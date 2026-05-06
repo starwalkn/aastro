@@ -54,9 +54,7 @@ const (
 )
 
 func NewMiddleware() sdk.Middleware {
-	return &Middleware{
-		log: logger.New(false),
-	}
+	return &Middleware{}
 }
 
 func (m *Middleware) Name() string {
@@ -113,6 +111,12 @@ func (m *Middleware) Init(config map[string]interface{}) error {
 	}
 
 	m.resolver = resolver
+
+	log, err := logger.New(false)
+	if err != nil {
+		return err
+	}
+	m.log = log
 
 	return nil
 }

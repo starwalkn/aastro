@@ -1,19 +1,25 @@
 package logger
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-func New(debug bool) *zap.Logger {
+func New(debug bool) (*zap.Logger, error) {
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
 
-	var lvl zapcore.Level
+	var (
+		options []zap.Option
+		lvl     zapcore.Level
+	)
 
 	if debug {
 		lvl = zap.DebugLevel
 	} else {
+		options = append(options, zap.AddStacktrace(zapcore.PanicLevel))
 		lvl = zap.InfoLevel
 	}
 
@@ -26,10 +32,10 @@ func New(debug bool) *zap.Logger {
 		ErrorOutputPaths: []string{"stderr"},
 	}
 
-	log, err := config.Build()
+	log, err := config.Build(options...)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("build logger: %w", err)
 	}
 
-	return log
+	return log, nil
 }
