@@ -12,8 +12,9 @@ const (
 )
 
 type entry struct {
-	count   int
-	resetAt time.Time
+	currentCount  int
+	previousCount int
+	windowStart   time.Time
 }
 
 type RateLimit struct {
@@ -22,12 +23,14 @@ type RateLimit struct {
 	mu      sync.Mutex
 	buckets map[string]*entry
 
-	stopCh  chan struct{}
-	stopped bool
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func New(cfg map[string]interface{}) *RateLimit {
-	window, err := time.ParseDuration(cfg["window"].(string))
+	windowStr, _ := cfg["window"].(string)
+
+	window, err := time.ParseDuration(windowStr)
 	if err != nil {
 		window = defaultWindow
 	}
@@ -35,11 +38,8 @@ func New(cfg map[string]interface{}) *RateLimit {
 	return &RateLimit{
 		limit:   intFrom(cfg, "limit", defaultLimit),
 		window:  window,
-		mu:      sync.Mutex{},
 		buckets: make(map[string]*entry),
-
 		stopCh:  make(chan struct{}),
-		stopped: false,
 	}
 }
 
@@ -62,15 +62,9 @@ func (rl *RateLimit) Start() error {
 }
 
 func (rl *RateLimit) Stop() error {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	if rl.stopped {
-		return nil
-	}
-
-	close(rl.stopCh)
-	rl.stopped = true
+	rl.stopOnce.Do(func() {
+		close(rl.stopCh)
+	})
 
 	return nil
 }
@@ -82,34 +76,47 @@ func (rl *RateLimit) Allow(key string) bool {
 	now := time.Now()
 
 	ent, ok := rl.buckets[key]
-	if !ok || now.After(ent.resetAt) {
-		// New window
-		reset := now.Add(rl.window)
-
-		rl.buckets[key] = &entry{
-			count:   1,
-			resetAt: reset,
+	if !ok {
+		ent = &entry{
+			windowStart: now.Truncate(rl.window),
 		}
 
-		return true
+		rl.buckets[key] = ent
 	}
 
-	if ent.count < rl.limit {
-		ent.count++
-		return true
+	elapsed := now.Sub(ent.windowStart)
+	if elapsed >= rl.window {
+		if elapsed >= 2*rl.window {
+			ent.previousCount = 0
+		} else {
+			ent.previousCount = ent.currentCount
+		}
+
+		ent.currentCount = 0
+		ent.windowStart = now.Truncate(rl.window)
 	}
 
-	return false
+	elapsed = now.Sub(ent.windowStart)
+	weight := 1.0 - float64(elapsed)/float64(rl.window)
+	estimated := float64(ent.previousCount)*weight + float64(ent.currentCount)
+
+	if int(estimated) >= rl.limit {
+		return false
+	}
+
+	ent.currentCount++
+
+	return true
 }
 
 func (rl *RateLimit) cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
+	cutoff := time.Now().Add(-2 * rl.window)
 
 	for key, ent := range rl.buckets {
-		if now.After(ent.resetAt) {
+		if ent.windowStart.Before(cutoff) {
 			delete(rl.buckets, key)
 		}
 	}

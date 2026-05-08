@@ -7,7 +7,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.3.0] - ?
+## [0.3.1] - ???
+
+### Changed
+
+Golang build version ldflags will now automatically come from the docker meta step outputs
+Sliding window rate limiter instead of fixed-window
+
+## [0.3.0] - 2026-05-04
 
 ### Added
 
