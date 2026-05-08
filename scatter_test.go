@@ -42,8 +42,8 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(results).To(HaveLen(2))
-			Expect(results[0].err).To(BeNil())
-			Expect(results[1].err).To(BeNil())
+			Expect(results[0].err).ToNot(HaveOccurred())
+			Expect(results[1].err).ToNot(HaveOccurred())
 			Expect(string(results[0].body)).To(Equal("A"))
 			Expect(string(results[1].body)).To(Equal("B"))
 		})
@@ -65,7 +65,7 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, req)
 
 			Expect(results).To(HaveLen(1))
-			Expect(results[0].err).To(BeNil())
+			Expect(results[0].err).ToNot(HaveOccurred())
 			Expect(string(results[0].body)).To(Equal("hello"))
 		})
 
@@ -168,8 +168,8 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(results).To(HaveLen(2))
-			Expect(results[0].err).To(BeNil())
-			Expect(results[1].err).ToNot(BeNil())
+			Expect(results[0].err).ToNot(HaveOccurred())
+			Expect(results[1].err).To(HaveOccurred())
 			Expect(results[1].err.Unwrap()).To(MatchError("empty body not allowed by upstream policy"))
 		})
 
@@ -186,7 +186,7 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(results).To(HaveLen(1))
-			Expect(results[0].err).ToNot(BeNil())
+			Expect(results[0].err).To(HaveOccurred())
 		})
 
 		It("rejects responses larger than max_response_body_size", func() {
@@ -202,7 +202,7 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(results).To(HaveLen(1))
-			Expect(results[0].err).ToNot(BeNil())
+			Expect(results[0].err).To(HaveOccurred())
 			Expect(results[0].err.kind).To(Equal(upstreamBodyTooLarge))
 		})
 
@@ -219,7 +219,7 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(results).To(HaveLen(1))
-			Expect(results[0].err).ToNot(BeNil())
+			Expect(results[0].err).To(HaveOccurred())
 			Expect(results[0].err.kind).To(Equal(upstreamTimeout))
 		})
 	})
@@ -250,7 +250,7 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(results).To(HaveLen(1))
-			Expect(results[0].err).To(BeNil())
+			Expect(results[0].err).ToNot(HaveOccurred())
 			Expect(attempts.Load()).To(Equal(int32(3)))
 		})
 
@@ -277,7 +277,7 @@ var _ = Describe("Scatter", func() {
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(results).To(HaveLen(1))
-			Expect(results[0].err).ToNot(BeNil())
+			Expect(results[0].err).To(HaveOccurred())
 			Expect(results[0].err.kind).To(Equal(upstreamBadStatus))
 			Expect(attempts.Load()).To(Equal(int32(maxRetries + 1)))
 		})
@@ -307,11 +307,11 @@ var _ = Describe("Scatter", func() {
 			}
 
 			for i := range maxFailures {
-				Expect(results[i].err).ToNot(BeNil())
+				Expect(results[i].err).To(HaveOccurred())
 				Expect(results[i].err.kind).To(Equal(upstreamBadStatus))
 			}
 			for i := maxFailures; i < 5; i++ {
-				Expect(results[i].err).ToNot(BeNil())
+				Expect(results[i].err).To(HaveOccurred())
 				Expect(results[i].err.kind).To(Equal(upstreamCircuitOpen))
 			}
 			Expect(upstreamCalls.Load()).To(Equal(int32(maxFailures)))
@@ -338,17 +338,17 @@ var _ = Describe("Scatter", func() {
 			d := newTestScatter()
 
 			r1 := d.scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
-			Expect(r1[0].err).ToNot(BeNil())
+			Expect(r1[0].err).To(HaveOccurred())
 			Expect(r1[0].err.kind).To(Equal(upstreamBadStatus))
 
 			r2 := d.scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
-			Expect(r2[0].err).ToNot(BeNil())
+			Expect(r2[0].err).To(HaveOccurred())
 			Expect(r2[0].err.kind).To(Equal(upstreamCircuitOpen))
 
 			time.Sleep(resetTimeout + 20*time.Millisecond)
 
 			r3 := d.scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
-			Expect(r3[0].err).To(BeNil())
+			Expect(r3[0].err).ToNot(HaveOccurred())
 		})
 	})
 

@@ -25,6 +25,8 @@ type RateLimit struct {
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
+
+	now func() time.Time // injected for tests; defaults to time.Now
 }
 
 func New(cfg map[string]interface{}) *RateLimit {
@@ -40,6 +42,7 @@ func New(cfg map[string]interface{}) *RateLimit {
 		window:  window,
 		buckets: make(map[string]*entry),
 		stopCh:  make(chan struct{}),
+		now:     time.Now,
 	}
 }
 
@@ -73,7 +76,7 @@ func (rl *RateLimit) Allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
+	now := rl.now()
 
 	ent, ok := rl.buckets[key]
 	if !ok {
@@ -113,7 +116,7 @@ func (rl *RateLimit) cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	cutoff := time.Now().Add(-2 * rl.window)
+	cutoff := rl.now().Add(-2 * rl.window)
 
 	for key, ent := range rl.buckets {
 		if ent.windowStart.Before(cutoff) {
