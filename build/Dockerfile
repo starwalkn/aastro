@@ -10,8 +10,9 @@ COPY . .
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION
 
-RUN make all GOOS=${TARGETOS} GOARCH=${TARGETARCH}
+RUN make all GOOS=${TARGETOS} GOARCH=${TARGETARCH} VERSION=${VERSION}
 
 # Stage 2: Final minimal image
 FROM debian:12-slim AS runtime

@@ -3,13 +3,16 @@ GOARCH ?= amd64
 PLUGIN_OUT=build/plugins
 MIDDLEWARE_OUT=build/middlewares
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS := -X main.version=$(VERSION)
+
 .PHONY: all build plugins clean lint test
 
 all: clean build plugins
 
 build:
 	mkdir -p .bin
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -ldflags="-X 'main.version=v0.3.0'" -o .bin/kono ./cmd/kono
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -o .bin/kono ./cmd/kono
 
 plugins:
 	mkdir -p $(PLUGIN_OUT)
