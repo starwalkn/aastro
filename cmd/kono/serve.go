@@ -58,7 +58,10 @@ func runServe() error {
 		return err
 	}
 
-	log := logger.New(cfg.Debug)
+	log, err := logger.New(cfg.Debug)
+	if err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

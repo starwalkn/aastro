@@ -325,7 +325,7 @@ var _ = Describe("httpUpstream", func() {
 			up := newTestUpstream(server.URL)
 			resp := up.call(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil), nil)
 
-			Expect(resp.err).To(BeNil())
+			Expect(resp.err).ToNot(HaveOccurred())
 			Expect(string(resp.body)).To(Equal(`{"ok":true}`))
 		})
 
@@ -337,7 +337,7 @@ var _ = Describe("httpUpstream", func() {
 
 			resp := up.call(ctx, httptest.NewRequest(http.MethodGet, "/", nil), nil)
 
-			Expect(resp.err).ToNot(BeNil())
+			Expect(resp.err).To(HaveOccurred())
 			Expect(resp.err.kind).To(Equal(upstreamCanceled))
 		})
 
@@ -363,7 +363,7 @@ var _ = Describe("httpUpstream", func() {
 
 			resp := up.call(ctx, httptest.NewRequest(http.MethodGet, "/", nil), nil)
 
-			Expect(resp.err).ToNot(BeNil())
+			Expect(resp.err).To(HaveOccurred())
 			Expect(resp.err.kind).To(Equal(upstreamCanceled))
 			Expect(calls.Load()).To(BeNumerically("<=", 2))
 		})
@@ -406,17 +406,17 @@ var _ = Describe("httpUpstream", func() {
 			req := func() *http.Request { return httptest.NewRequest(http.MethodGet, "/", nil) }
 
 			r1 := up.call(context.Background(), req(), nil)
-			Expect(r1.err).ToNot(BeNil())
+			Expect(r1.err).To(HaveOccurred())
 			Expect(r1.err.kind).To(Equal(upstreamBadStatus))
 
 			r2 := up.call(context.Background(), req(), nil)
-			Expect(r2.err).ToNot(BeNil())
+			Expect(r2.err).To(HaveOccurred())
 			Expect(r2.err.kind).To(Equal(upstreamCircuitOpen))
 
 			time.Sleep(resetTimeout + 20*time.Millisecond)
 
 			r3 := up.call(context.Background(), req(), nil)
-			Expect(r3.err).To(BeNil())
+			Expect(r3.err).ToNot(HaveOccurred())
 		})
 	})
 })

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/jwk"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
 const (
@@ -73,20 +73,21 @@ func (r *jwksResolver) refresh(timeout time.Duration) error {
 		return fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
 
-	newKeys := make(map[string]*rsa.PublicKey)
+	newKeys := make(map[string]*rsa.PublicKey, set.Len())
 
 	for i := range set.Len() {
-		key, ok := set.Get(i)
+		key, ok := set.Key(i)
 		if !ok {
 			continue
 		}
 
 		var rsaKey *rsa.PublicKey
-		if err = key.Raw(&rsaKey); err != nil {
-			continue // Skip unsupported keys.
+		if err = jwk.Export(key, &rsaKey); err != nil {
+			continue // Skip non-RSA or otherwise unsupported keys
 		}
 
-		if kid := key.KeyID(); kid != "" {
+		var kid string
+		if kid, ok = key.KeyID(); ok && kid != "" {
 			newKeys[kid] = rsaKey
 		}
 	}

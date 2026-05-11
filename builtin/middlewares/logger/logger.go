@@ -37,7 +37,11 @@ func (m *Middleware) Init(cfg map[string]interface{}) error {
 		m.logBody = val
 	}
 
-	m.log = logger.New(false)
+	log, err := logger.New(false)
+	if err != nil {
+		return err
+	}
+	m.log = log
 
 	return nil
 }

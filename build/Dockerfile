@@ -1,5 +1,5 @@
 # Stage 1: Build Go kono binary
-FROM golang:1.25.4-bookworm AS builder
+FROM golang:1.25.9-bookworm AS builder
 
 WORKDIR /app
 
@@ -10,8 +10,9 @@ COPY . .
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION
 
-RUN make all GOOS=${TARGETOS} GOARCH=${TARGETARCH}
+RUN make all GOOS=${TARGETOS} GOARCH=${TARGETARCH} VERSION=${VERSION}
 
 # Stage 2: Final minimal image
 FROM debian:12-slim AS runtime

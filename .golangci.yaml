@@ -124,6 +124,7 @@ linters:
     - errcheck # checking for unchecked errors, these unchecked errors can be critical bugs in some cases
     - nestif # reports deeply nested if statements
     - godox # detects usage of FIXME, TODO and other keywords inside comments
+    - ginkgolinter # [if you use ginkgo/gomega] enforces standards of using ginkgo and gomega
 
     ## you may want to enable
     #- wrapcheck # checks that errors returned from external packages are wrapped
@@ -142,7 +143,6 @@ linters:
     #- arangolint # opinionated best practices for arangodb client
     #- decorder # checks declaration order and count of types, constants, variables and functions
     #- exhaustruct # [highly recommend to enable] checks if all structure fields are initialized
-    #- ginkgolinter # [if you use ginkgo/gomega] enforces standards of using ginkgo and gomega
     #- goheader # checks is file header matches to pattern
     #- inamedparam # [great idea, but too strict, need to ignore a lot of cases by default] reports interfaces with unnamed method parameters
     #- interfacebloat # checks the number of methods inside an interface
