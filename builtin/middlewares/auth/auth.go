@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,10 +33,10 @@ type closeable interface {
 type Middleware struct {
 	issuer    string
 	audience  string
+	realm     string
 	resolver  keyResolver
 	jwtConfig jwtConfig
-
-	log *zap.Logger
+	log       *zap.Logger
 }
 
 type jwtConfig struct {
@@ -48,9 +49,20 @@ type jwtConfig struct {
 	jwksRefreshInterval time.Duration
 }
 
+type authChallenge struct {
+	errorCode        string
+	errorDescription string
+}
+
 const (
 	defaultLeeway        = 5 * time.Second
 	authHeaderPartsCount = 2
+
+	defaultRealm     = "kono"
+	bearerAuthScheme = "Bearer"
+
+	authErrorInvalidRequest = "invalid_request"
+	authErrorInvalidToken   = "invalid_token"
 )
 
 func NewMiddleware() sdk.Middleware {
@@ -79,6 +91,20 @@ func (m *Middleware) Init(config map[string]interface{}) error {
 
 	m.issuer = issuer
 	m.audience = audience
+	m.realm = defaultRealm
+
+	rawRealm, hasRealm := config["realm"]
+	if hasRealm {
+		realm, isString := rawRealm.(string)
+		if !isString {
+			return errors.New("realm must be a string")
+		}
+
+		realm = strings.TrimSpace(realm)
+		if realm != "" {
+			m.realm = realm
+		}
+	}
 
 	cfg := jwtConfig{alg: alg}
 
@@ -125,13 +151,16 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			unauthorized(w)
+			m.unauthorized(w, authChallenge{})
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", authHeaderPartsCount)
 		if len(parts) != authHeaderPartsCount || !strings.EqualFold(parts[0], "Bearer") {
-			unauthorized(w)
+			m.unauthorized(w, authChallenge{
+				errorCode:        authErrorInvalidRequest,
+				errorDescription: "invalid authorization header",
+			})
 			return
 		}
 
@@ -143,18 +172,27 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			jwt.WithLeeway(defaultLeeway),
 		)
 		if err != nil || !token.Valid {
-			unauthorized(w)
+			m.unauthorized(w, authChallenge{
+				errorCode:        authErrorInvalidToken,
+				errorDescription: "invalid or expired token",
+			})
 			return
 		}
 
 		claims, ok := token.Claims.(*jwt.MapClaims)
 		if !ok {
-			unauthorized(w)
+			m.unauthorized(w, authChallenge{
+				errorCode:        authErrorInvalidToken,
+				errorDescription: "invalid token claims",
+			})
 			return
 		}
 
 		if err = m.validateClaims(claims); err != nil {
-			unauthorized(w)
+			m.unauthorized(w, authChallenge{
+				errorCode:        authErrorInvalidToken,
+				errorDescription: "invalid token claims",
+			})
 			return
 		}
 
@@ -229,10 +267,37 @@ func (m *Middleware) newJWKSResolver(cfg jwtConfig) (keyResolver, error) {
 	return r, nil
 }
 
-func unauthorized(w http.ResponseWriter) {
+func (m *Middleware) unauthorized(w http.ResponseWriter, c authChallenge) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(
+		"WWW-Authenticate",
+		buildWWWAuthenticateHeader(m.realm, c.errorCode, c.errorDescription),
+	)
+
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"errors":[{"code":"UNAUTHORIZED"}]}`))
+}
+
+func buildWWWAuthenticateHeader(realm, errorCode, errorDescription string) string {
+	realm = strings.TrimSpace(realm)
+
+	if realm == "" {
+		realm = defaultRealm
+	}
+
+	header := bearerAuthScheme + " realm=" + strconv.Quote(realm)
+
+	if errorCode == "" {
+		return header
+	}
+
+	header += ", error=" + strconv.Quote(errorCode)
+
+	if errorDescription != "" {
+		header += ", error_description=" + strconv.Quote(errorDescription)
+	}
+
+	return header
 }
 
 func parseDuration(config map[string]interface{}, key string, fallback time.Duration) time.Duration {

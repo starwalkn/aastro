@@ -39,6 +39,7 @@ var _ = Describe("Auth", func() {
 			m = &Middleware{
 				issuer:   "test-issuer",
 				audience: "test-aud",
+				realm:    defaultRealm,
 				resolver: &hmacResolver{HMACSecret: secret},
 				jwtConfig: jwtConfig{
 					alg:        "HS256",
@@ -59,6 +60,7 @@ var _ = Describe("Auth", func() {
 				h.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(`Bearer realm="kono"`))
 			})
 		})
 
@@ -76,6 +78,9 @@ var _ = Describe("Auth", func() {
 				h.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
+					`Bearer realm="kono", error="invalid_token", error_description="invalid or expired token"`,
+				))
 			})
 		})
 
@@ -96,6 +101,9 @@ var _ = Describe("Auth", func() {
 				h.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
+					`Bearer realm="kono", error="invalid_token", error_description="invalid or expired token"`,
+				))
 			})
 		})
 
@@ -121,9 +129,77 @@ var _ = Describe("Auth", func() {
 				h.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(rec.Header().Get("WWW-Authenticate")).To(BeEmpty())
 				Expect(gotClaims).ToNot(BeNil())
 				Expect(gotClaims.GetIssuer()).To(Equal("test-issuer"))
 				Expect(gotClaims.GetAudience()).To(ContainElement("test-aud"))
+
+			})
+		})
+		Context("malformed authorization header", func() {
+			It("returns invalid_request challenge", func() {
+				h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = w.Write([]byte("ok"))
+				}))
+
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				req.Header.Set("Authorization", "Basic abc123")
+
+				rec := httptest.NewRecorder()
+
+				h.ServeHTTP(rec, req)
+
+				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
+					`Bearer realm="kono", error="invalid_request", error_description="invalid authorization header"`,
+				))
+			})
+		})
+		Describe("buildWWWAuthenticateHeader", func() {
+			It("builds a realm-only Bearer challenge", func() {
+				Expect(buildWWWAuthenticateHeader("kono", "", "")).To(Equal(`Bearer realm="kono"`))
+			})
+
+			It("builds an invalid_token Bearer challenge", func() {
+				Expect(buildWWWAuthenticateHeader("kono", authErrorInvalidToken, "invalid or expired token")).To(Equal(
+					`Bearer realm="kono", error="invalid_token", error_description="invalid or expired token"`,
+				))
+			})
+
+			It("uses the default realm when realm is empty", func() {
+				Expect(buildWWWAuthenticateHeader("", authErrorInvalidRequest, "invalid authorization header")).To(Equal(
+					`Bearer realm="kono", error="invalid_request", error_description="invalid authorization header"`,
+				))
+			})
+		})
+		Describe("Init", func() {
+			It("uses a custom realm from config", func() {
+				middleware := &Middleware{}
+
+				err := middleware.Init(map[string]interface{}{
+					"issuer":      "test-issuer",
+					"audience":    "test-aud",
+					"alg":         "HS256",
+					"hmac_secret": "c2VjcmV0",
+					"realm":       "custom-realm",
+				})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(middleware.realm).To(Equal("custom-realm"))
+			})
+
+			It("uses the default realm when none is configured", func() {
+				middleware := &Middleware{}
+
+				err := middleware.Init(map[string]interface{}{
+					"issuer":      "test-issuer",
+					"audience":    "test-aud",
+					"alg":         "HS256",
+					"hmac_secret": "c2VjcmV0",
+				})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(middleware.realm).To(Equal(defaultRealm))
 			})
 		})
 	})
