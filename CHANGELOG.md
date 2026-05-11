@@ -7,16 +7,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.3.1] - ???
+## [0.3.1] - 2026-05-11
+
+### Added
+
+- Add `WWW-Authenticate` header to auth middleware
 
 ### Changed
 
-Golang build version ldflags will now automatically come from the docker meta step outputs
-Sliding window rate limiter instead of fixed-window
+- Golang build version ldflags will now automatically come from the docker meta step outputs
+- Sliding window rate limiter instead of fixed-window
 
 ### Fixed
 
-Added missing masker plugin and cors middleware to image
+- Added missing masker plugin and cors middleware to image
 
 ## [0.3.0] - 2026-05-04
 
