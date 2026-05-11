@@ -7,6 +7,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.4.0] - ???
+
+### Added
+
+- mTLS support for server and upstreams
+
+### Changed
+
+- pprof and service endpoints (`/metrics`, `__health`) now use the same separate port and address
+
 ## [0.3.1] - 2026-05-11
 
 ### Added
