@@ -243,7 +243,7 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	if cfg.Gateway.Server.Port == cfg.Gateway.Server.AdminPort {
-		return Config{}, fmt.Errorf("server.port and server.admin_port must differ")
+		return Config{}, errors.New("server.port and server.admin_port must differ")
 	}
 
 	if err = validatePathParams(cfg); err != nil {

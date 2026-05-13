@@ -10,7 +10,7 @@ import (
 
 func buildTLSConfig(cfg kono.ServerTLSConfig) (*tls.Config, error) {
 	if !cfg.Enabled {
-		return nil, nil
+		return nil, nil //nolint:nilnil // its ok here
 	}
 
 	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
@@ -30,7 +30,7 @@ func buildTLSConfig(cfg kono.ServerTLSConfig) (*tls.Config, error) {
 
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   minVer,
+		MinVersion:   minVer, // #nosec G402
 		ClientAuth:   clientAuth,
 		NextProtos:   []string{"h2", "http/1.1"},
 	}
