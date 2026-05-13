@@ -133,8 +133,8 @@ type UpstreamConfig struct {
 
 type TLSConfig struct {
 	Enabled            bool   `yaml:"enabled"`
-	CertFile           string `yaml:"cert_file" validate:"required_if=Enabled true"`
-	KeyFile            string `yaml:"key_file" validate:"required_if=Enabled true"`
+	CertFile           string `yaml:"cert_file" validate:"required_with=KeyFile"`
+	KeyFile            string `yaml:"key_file" validate:"required_with=CertFile"`
 	CAFile             string `yaml:"ca_file"`
 	ServerName         string `yaml:"server_name"`
 	InsecureSkipVerify bool   `yaml:"insecure_skip_verify"`

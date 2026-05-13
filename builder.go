@@ -2,6 +2,7 @@ package kono
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -13,12 +14,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/starwalkn/kono/internal/circuitbreaker"
 	"github.com/starwalkn/kono/internal/metric"
 	"github.com/starwalkn/kono/internal/otelcommon"
 	"github.com/starwalkn/kono/internal/ratelimit"
+	"github.com/starwalkn/kono/internal/tlsutil"
 	"github.com/starwalkn/kono/internal/tracing"
 )
 
@@ -211,7 +214,10 @@ func parseTrustedProxies(proxies []string) ([]*net.IPNet, error) {
 }
 
 func compileFlow(cfg FlowConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) (flow, error) {
-	upstreams := initUpstreams(cfg.Upstreams, trustedProxies, metrics, log)
+	upstreams, err := initUpstreams(cfg.Upstreams, trustedProxies, metrics, log)
+	if err != nil {
+		return flow{}, fmt.Errorf("init upstreams: %w", err)
+	}
 
 	if cfg.Passthrough && len(upstreams) != 1 {
 		return flow{}, fmt.Errorf(
@@ -333,26 +339,48 @@ func compileConflictPolicy(p string) (conflictPolicy, error) {
 	}
 }
 
-func initUpstreams(cfgs []UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) []upstream {
+func initUpstreams(cfgs []UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) ([]upstream, error) {
 	upstreams := make([]upstream, 0, len(cfgs))
 
 	for _, cfg := range cfgs {
-		upstreams = append(upstreams, buildUpstream(cfg, trustedProxies, metrics, log))
+		u, err := buildUpstream(cfg, trustedProxies, metrics, log)
+		if err != nil {
+			return nil, fmt.Errorf("build upstream: %w", err)
+		}
+
+		upstreams = append(upstreams, u)
 	}
 
-	return upstreams
+	return upstreams, nil
 }
 
-func buildUpstream(cfg UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) upstream {
+func buildUpstream(cfg UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) (upstream, error) {
+	tlsCfg, err := buildUpstreamTLSConfig(cfg.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("build TLS config: %w", err)
+	}
+
+	transport, err := buildUpstreamTransport(cfg, tlsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("build upstream transport: %w", err)
+	}
+
+	if cfg.TLS.InsecureSkipVerify {
+		log.Warn("TLS verification disabled for upstream",
+			zap.String("upstream", cfg.Name),
+			zap.Strings("hosts", cfg.Hosts),
+		)
+	}
+
 	return &httpUpstream{
 		cfg:            buildUpstreamConfig(cfg, trustedProxies),
 		state:          buildUpstreamState(cfg.Hosts),
 		circuitBreaker: buildCircuitBreaker(cfg.Policy.CircuitBreakerConfig),
 		metrics:        metrics,
 		log:            log,
-		client:         buildUpstreamHTTPClient(cfg),
-		streamClient:   buildUpstreamStreamClient(cfg),
-	}
+		client:         &http.Client{Transport: transport, Timeout: cfg.Timeout},
+		streamClient:   &http.Client{Transport: transport},
+	}, nil
 }
 
 func buildUpstreamConfig(cfg UpstreamConfig, trustedProxies []*net.IPNet) upstreamConfig {
@@ -411,28 +439,60 @@ func buildCircuitBreaker(cfg CircuitBreakerConfig) *circuitbreaker.CircuitBreake
 	return circuitbreaker.New(cfg.MaxFailures, cfg.ResetTimeout)
 }
 
-func buildUpstreamHTTPClient(cfg UpstreamConfig) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			MaxConnsPerHost:     0,
-			MaxIdleConns:        cfg.Transport.MaxIdleConns,
-			MaxIdleConnsPerHost: cfg.Transport.MaxIdleConnsPerHost,
-			IdleConnTimeout:     cfg.Transport.IdleConnTimeout,
-			ForceAttemptHTTP2:   true,
-		},
-		Timeout: cfg.Timeout,
+func buildUpstreamTransport(cfg UpstreamConfig, tlsCfg *tls.Config) (*http.Transport, error) {
+	t := &http.Transport{
+		MaxIdleConns:        cfg.Transport.MaxIdleConns,
+		MaxIdleConnsPerHost: cfg.Transport.MaxIdleConnsPerHost,
+		IdleConnTimeout:     cfg.Transport.IdleConnTimeout,
+		ForceAttemptHTTP2:   true,
+		TLSClientConfig:     tlsCfg,
 	}
+
+	if tlsCfg != nil {
+		if err := http2.ConfigureTransport(t); err != nil {
+			return nil, fmt.Errorf("configure HTTP/2: %w", err)
+		}
+	}
+
+	return t, nil
 }
 
-func buildUpstreamStreamClient(cfg UpstreamConfig) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			MaxIdleConns:        cfg.Transport.MaxIdleConns,
-			MaxIdleConnsPerHost: cfg.Transport.MaxIdleConnsPerHost,
-			IdleConnTimeout:     cfg.Transport.IdleConnTimeout,
-			ForceAttemptHTTP2:   true,
-		},
+func buildUpstreamTLSConfig(cfg TLSConfig) (*tls.Config, error) {
+	if !cfg.Enabled {
+		return nil, nil
 	}
+
+	minVer, err := tlsutil.ParseVersion(cfg.MinVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	tlsCfg := &tls.Config{
+		MinVersion:         minVer,
+		NextProtos:         []string{"h2", "http/1.1"},
+		ServerName:         cfg.ServerName,
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
+	}
+
+	if cfg.CertFile != "" {
+		cert, loadErr := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		if loadErr != nil {
+			return nil, fmt.Errorf("load client keypair: %w", loadErr)
+		}
+
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	}
+
+	if cfg.CAFile != "" {
+		pool, loadErr := tlsutil.LoadCAPool(cfg.CAFile)
+		if loadErr != nil {
+			return nil, fmt.Errorf("load upstream CA: %w", loadErr)
+		}
+
+		tlsCfg.RootCAs = pool
+	}
+
+	return tlsCfg, nil
 }
 
 // makeUpstreamName returns the upstream name made up of its method and hosts separated by a hyphen.

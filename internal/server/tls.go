@@ -2,11 +2,10 @@ package server
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"os"
 
 	"github.com/starwalkn/kono"
+	"github.com/starwalkn/kono/internal/tlsutil"
 )
 
 func buildTLSConfig(cfg kono.ServerTLSConfig) (*tls.Config, error) {
@@ -19,12 +18,12 @@ func buildTLSConfig(cfg kono.ServerTLSConfig) (*tls.Config, error) {
 		return nil, fmt.Errorf("load server keypair: %w", err)
 	}
 
-	minVer, err := parseTLSVersion(cfg.MinVersion)
+	minVer, err := tlsutil.ParseVersion(cfg.MinVersion)
 	if err != nil {
 		return nil, err
 	}
 
-	clientAuth, err := parseClientAuth(cfg.ClientAuth)
+	clientAuth, err := tlsutil.ParseClientAuth(cfg.ClientAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -37,51 +36,13 @@ func buildTLSConfig(cfg kono.ServerTLSConfig) (*tls.Config, error) {
 	}
 
 	if clientAuth != tls.NoClientCert {
-		pool, err := loadCAPool(cfg.ClientCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("load client CA: %w", err)
+		pool, caErr := tlsutil.LoadCAPool(cfg.ClientCAFile)
+		if caErr != nil {
+			return nil, fmt.Errorf("load client CA: %w", caErr)
 		}
 
 		tlsCfg.ClientCAs = pool
 	}
 
 	return tlsCfg, nil
-}
-
-func parseTLSVersion(s string) (uint16, error) {
-	switch s {
-	case "", "1.2":
-		return tls.VersionTLS12, nil
-	case "1.3":
-		return tls.VersionTLS13, nil
-	default:
-		return 0, fmt.Errorf("unsupported tls min_version: %q (allowed: 1.2, 1.3)", s)
-	}
-}
-
-func parseClientAuth(s string) (tls.ClientAuthType, error) {
-	switch s {
-	case "", "none":
-		return tls.NoClientCert, nil
-	case "optional":
-		return tls.VerifyClientCertIfGiven, nil
-	case "require":
-		return tls.RequireAndVerifyClientCert, nil
-	default:
-		return 0, fmt.Errorf("unknown client_auth: %q", s)
-	}
-}
-
-func loadCAPool(path string) (*x509.CertPool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read CA file: %w", err)
-	}
-
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(data) {
-		return nil, fmt.Errorf("no valid certificates found in %q", path)
-	}
-
-	return pool, nil
 }
