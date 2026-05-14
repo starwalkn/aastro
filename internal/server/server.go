@@ -55,6 +55,7 @@ func New(ctx context.Context, cfg kono.GatewayConfig, version string, log *zap.L
 			ReadTimeout:       adminTimeout,
 			WriteTimeout:      adminTimeout,
 			ReadHeaderTimeout: cfg.Server.HeaderTimeout,
+			ErrorLog:          stdLog,
 		},
 		router:    bundle.Router,
 		providers: []otelcommon.Provider{bundle.MeterProvider, bundle.TracerProvider},
