@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -24,9 +25,13 @@ type Server struct {
 	router      *kono.Router
 	providers   []otelcommon.Provider
 	log         *zap.Logger
+
+	shuttingDown *atomic.Bool
 }
 
 func New(ctx context.Context, cfg kono.GatewayConfig, version string, log *zap.Logger) (*Server, error) {
+	shuttingDown := &atomic.Bool{}
+
 	bundle, err := bootstrapRouter(ctx, cfg, version, log)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap router: %w", err)
@@ -51,15 +56,16 @@ func New(ctx context.Context, cfg kono.GatewayConfig, version string, log *zap.L
 		},
 		adminServer: &http.Server{
 			Addr:              fmt.Sprintf("%s:%d", cfg.Server.AdminBindAddr, cfg.Server.AdminPort),
-			Handler:           buildAdminHandler(bundle, cfg.Server.Pprof.Enabled),
+			Handler:           buildAdminHandler(bundle, shuttingDown, cfg.Server.Pprof.Enabled),
 			ReadTimeout:       adminTimeout,
 			WriteTimeout:      adminTimeout,
 			ReadHeaderTimeout: cfg.Server.HeaderTimeout,
 			ErrorLog:          stdLog,
 		},
-		router:    bundle.Router,
-		providers: []otelcommon.Provider{bundle.MeterProvider, bundle.TracerProvider},
-		log:       log,
+		router:       bundle.Router,
+		providers:    []otelcommon.Provider{bundle.MeterProvider, bundle.TracerProvider},
+		log:          log,
+		shuttingDown: shuttingDown,
 	}, nil
 }
 
@@ -99,6 +105,8 @@ func (s *Server) startDataServer() error {
 // flushes observability providers. Order matters: HTTP first so no in-flight
 // request writes to a provider that is already shutting down.
 func (s *Server) Stop(ctx context.Context) error {
+	s.shuttingDown.Store(true)
+
 	var errs []error
 
 	if err := s.dataServer.Shutdown(ctx); err != nil {
@@ -145,13 +153,11 @@ func buildHandler(bundle kono.RouterBundle) http.Handler {
 	return mux
 }
 
-func buildAdminHandler(bundle kono.RouterBundle, pprofEnabled bool) http.Handler {
+func buildAdminHandler(bundle kono.RouterBundle, shuttingDown *atomic.Bool, pprofEnabled bool) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("GET /__health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	}))
+	mux.Handle("GET /__health", livenessHandler())
+	mux.Handle("GET /__ready", readinessHandler(shuttingDown))
 
 	if bundle.PromRegistry != nil {
 		mux.Handle("/metrics", promhttp.HandlerFor(bundle.PromRegistry, promhttp.HandlerOpts{}))
@@ -166,4 +172,27 @@ func buildAdminHandler(bundle kono.RouterBundle, pprofEnabled bool) http.Handler
 	}
 
 	return mux
+}
+
+func livenessHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "ok"}`))
+	})
+}
+
+func readinessHandler(shuttingDown *atomic.Bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if shuttingDown.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"shutting_down"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	})
 }
