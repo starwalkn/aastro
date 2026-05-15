@@ -2,8 +2,15 @@ package kono
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"time"
@@ -188,6 +195,107 @@ func withCircuitBreaker(cb *circuitbreaker.CircuitBreaker) func(*httpUpstream) {
 func withTrustedProxies(proxies ...*net.IPNet) func(*httpUpstream) {
 	return func(u *httpUpstream) { u.cfg.trustedProxies = proxies }
 }
+
+func withTLS(tlsConfig *tls.Config) func(*httpUpstream) {
+	return func(u *httpUpstream) {
+		u.client = &http.Client{
+			Transport: &http.Transport{TLSClientConfig: tlsConfig},
+		}
+	}
+}
+
+// ── TLS fixture ───────────────────────────────────────────────────────────────
+
+type tlsFixture struct {
+	caCert *x509.Certificate
+	caKey  *ecdsa.PrivateKey
+}
+
+func newTLSFixture() *tlsFixture {
+	GinkgoHelper()
+
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	Expect(err).ToNot(HaveOccurred())
+
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "kono-test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &caKey.PublicKey, caKey)
+	Expect(err).ToNot(HaveOccurred())
+
+	caCert, err := x509.ParseCertificate(der)
+	Expect(err).ToNot(HaveOccurred())
+
+	return &tlsFixture{caCert: caCert, caKey: caKey}
+}
+
+func (f *tlsFixture) IssueServerCert() tls.Certificate {
+	GinkgoHelper()
+
+	return f.issueCert(certParams{
+		cn:          "test-server",
+		eku:         []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		dnsNames:    []string{"localhost"},
+		ipAddresses: []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+	})
+}
+
+func (f *tlsFixture) IssueClientCert(cn string) tls.Certificate {
+	GinkgoHelper()
+
+	return f.issueCert(certParams{
+		cn:  cn,
+		eku: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
+}
+
+func (f *tlsFixture) CertPool() *x509.CertPool {
+	pool := x509.NewCertPool()
+	pool.AddCert(f.caCert)
+	return pool
+}
+
+type certParams struct {
+	cn          string
+	eku         []x509.ExtKeyUsage
+	dnsNames    []string
+	ipAddresses []net.IP
+}
+
+func (f *tlsFixture) issueCert(p certParams) tls.Certificate {
+	GinkgoHelper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	Expect(err).ToNot(HaveOccurred())
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: p.cn},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  p.eku,
+		DNSNames:     p.dnsNames,
+		IPAddresses:  p.ipAddresses,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, f.caCert, &key.PublicKey, f.caKey)
+	Expect(err).ToNot(HaveOccurred())
+
+	return tls.Certificate{
+		Certificate: [][]byte{der},
+		PrivateKey:  key,
+	}
+}
+
+// ── Flow / scatter builders ───────────────────────────────────────────────────
 
 func newTestFlow(upstreams []upstream, parallelUpstreams int64) *flow {
 	return &flow{

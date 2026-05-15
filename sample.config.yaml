@@ -1,0 +1,282 @@
+# Kono - example configuration showcasing every available option.
+#
+# This file is meant as a reference, not a copy-paste production config.
+# Most blocks are optional; uncomment and adjust what you actually need.
+#
+# Required top-level sections: schema, gateway.server, gateway.admin, gateway.routing.
+# Everything else has sensible defaults.
+
+schema: v1
+debug: false   # verbose logging across router, scatter, and upstream components
+
+gateway:
+  # ── Service identity ─────────────────────────────────────────────────────
+  # Appears as service.name in OpenTelemetry resource attributes.
+
+  service:
+    name: kono
+
+  # ── Data port ────────────────────────────────────────────────────────────
+  # Serves API traffic. Optionally protected by TLS or mTLS.
+
+  server:
+    port: 7805
+    timeout: 20s             # read + write timeout per request
+    header_timeout: 5s       # Slowloris defence - caps header read time
+
+    # TLS / mTLS on the data port.
+    # Remove the tls block entirely for plain HTTP.
+    tls:
+      enabled: true
+      cert_file: /etc/kono/server.crt
+      key_file: /etc/kono/server.key
+      min_version: "1.2"     # 1.2 or 1.3 - older versions are not selectable
+      client_auth: require   # none | optional | require
+      client_ca_file: /etc/kono/client-ca.crt   # required unless client_auth=none
+
+  # ── Admin port ───────────────────────────────────────────────────────────
+  # Health probes, metrics, pprof. Bound to localhost by default.
+  # Never TLS-terminated - kubelet probes and Prometheus scrape over plain HTTP
+  # even when the data port enforces mTLS.
+
+  admin:
+    port: 9090
+    bind_addr: 127.0.0.1     # set to 0.0.0.0 only if Prometheus runs outside the pod
+    timeout: 5m              # generous to accommodate long pprof captures
+    header_timeout: 5s
+    enable_pprof: true       # exposes /debug/pprof/ on the admin port
+
+  # ── Observability ────────────────────────────────────────────────────────
+  # Push-based instrumentation. Metrics in prometheus mode also exposes
+  # /metrics on the admin port; OTLP mode is purely push.
+
+  observability:
+    metrics:
+      enabled: true
+      exporter: prometheus   # prometheus | otlp
+      # OTLP config is used only when exporter=otlp:
+      otlp:
+        endpoint: otel-collector:4318
+        insecure: true
+        interval: 10s
+
+    tracing:
+      enabled: true
+      exporter: otlp
+      sampling_ratio: 1.0    # 0.0–1.0 (1.0 = sample every trace)
+      otlp:
+        endpoint: otel-collector:4318
+        insecure: true
+        interval: 10s
+
+  # ── Routing ──────────────────────────────────────────────────────────────
+
+  routing:
+    # CIDR ranges whose X-Forwarded-* headers are appended to rather than overwritten.
+    # Leave empty if Kono is your outermost edge.
+    trusted_proxies:
+      - 127.0.0.1/32
+      - 10.0.0.0/8
+
+    # Per-IP rate limiter. The IP is the one extracted via trusted-proxy resolution.
+    rate_limiter:
+      enabled: true
+      config:
+        limit: 100
+        window: 1s
+
+    # ── Flow examples ──────────────────────────────────────────────────────
+    # A flow defines: how a request is matched, which upstreams it scatters to,
+    # how their responses are aggregated, and which plugins/middlewares run.
+
+    flows:
+      # ── Example 1: merge aggregation across two upstreams ────────────────
+      # Combines responses from `users` and `orders` services into a single
+      # JSON object. Returns 206 Partial Content if one fails and best_effort
+      # is enabled.
+
+      - path: /api/v1/customers/{customer_id}
+        method: GET
+        parallel_upstreams: 10   # max concurrent upstream calls per request
+
+        aggregation:
+          strategy: merge        # merge | array | namespace
+          best_effort: true      # return partial data on upstream failures
+          on_conflict:
+            policy: prefer       # overwrite | first | error | prefer
+            prefer_upstream: users   # this upstream wins on key collision
+
+        # Cross-cutting middlewares wrap the entire flow handler.
+        # First in the list = outermost wrapper.
+        middlewares:
+          - name: recoverer
+            source: builtin
+          - name: logger
+            source: builtin
+          - name: auth
+            source: builtin
+            config:
+              alg: HS256
+              issuer: https://auth.example.com
+              audience: api
+              hmac_secret: "base64secret"
+
+        # Plugins run at specific lifecycle phases (request / response).
+        plugins:
+          - name: snakeify
+            source: builtin
+          - name: tenant_resolver
+            source: file
+            path: /etc/kono/plugins/
+            config:
+              header: X-Tenant-Id
+
+        upstreams:
+          - name: users
+            hosts:
+              - https://users-1.internal
+              - https://users-2.internal
+            path: /v1/users/{customer_id}
+            method: GET
+            timeout: 3s
+
+            forward_headers: [ "Authorization", "X-Tenant-Id", "X-Request-Id" ]
+            forward_queries: [ "expand", "fields" ]
+            forward_params: [ "customer_id" ]
+
+            transport:
+              max_idle_conns: 100
+              max_idle_conns_per_host: 50
+              idle_conn_timeout: 90s
+
+            # Outbound mTLS to the upstream.
+            # Omit the tls block entirely for plain HTTPS - Go uses system roots.
+            tls:
+              enabled: true
+              cert_file: /etc/kono/clients/users.crt
+              key_file: /etc/kono/clients/users.key
+              ca_file: /etc/kono/internal-ca.crt
+              server_name: users.internal   # SNI / hostname verification
+              min_version: "1.2"
+
+            policy:
+              allowed_statuses: [ 200, 204 ]
+              require_body: true
+              max_response_body_size: 1048576   # 1 MiB
+
+              header_blacklist:
+                - X-Internal-Token
+
+              retry:
+                max_retries: 3
+                retry_on_statuses: [ 500, 502, 503, 504 ]
+                backoff_delay: 200ms
+
+              circuit_breaker:
+                enabled: true
+                max_failures: 5
+                reset_timeout: 10s
+
+              load_balancing:
+                mode: least_conns   # round_robin | least_conns
+
+          - name: orders
+            hosts: https://orders.internal   # single host - string is fine
+            path: /v1/customers/{customer_id}/orders
+            timeout: 2s
+            forward_params: [ "customer_id" ]
+            # No upstream tls block → public-ish HTTPS via system root CAs
+            policy:
+              allowed_statuses: [ 200 ]
+              retry:
+                max_retries: 2
+                retry_on_statuses: [ 503 ]
+                backoff_delay: 100ms
+
+      # ── Example 2: namespace aggregation ─────────────────────────────────
+      # Each upstream's response lives under a key named after the upstream:
+      # {"profile": {...}, "preferences": {...}}
+
+      - path: /api/v1/me
+        method: GET
+        aggregation:
+          strategy: namespace
+          best_effort: false   # any upstream failure fails the whole request
+
+        middlewares:
+          - name: auth
+            source: builtin
+            config:
+              alg: HS256
+              hmac_secret: "base64secret"
+
+        upstreams:
+          - name: profile
+            hosts: https://profile.internal
+            path: /v1/profile
+            forward_headers: [ "Authorization" ]
+          - name: preferences
+            hosts: https://prefs.internal
+            path: /v1/prefs
+            forward_headers: [ "Authorization" ]
+
+      # ── Example 3: array aggregation, POST with body ─────────────────────
+      # Each upstream response becomes an element of a JSON array.
+      # POST/PUT/PATCH bodies are forwarded; other methods discard the body.
+
+      - path: /api/v1/search
+        method: POST
+        aggregation:
+          strategy: array
+          best_effort: true
+
+        upstreams:
+          - name: catalog
+            hosts: https://catalog.internal
+            path: /v1/search
+            method: POST
+            timeout: 5s
+            forward_headers: [ "Content-Type", "Authorization", "X-*" ]
+          - name: docs
+            hosts: https://docs.internal
+            path: /v2/query
+            method: POST
+            timeout: 5s
+            forward_headers: [ "Content-Type", "Authorization" ]
+
+      # ── Example 4: passthrough (SSE / chunked / streaming) ───────────────
+      # Bypasses aggregation entirely. Body streams chunk-by-chunk to the
+      # client. Requires exactly one upstream. Response-phase plugins do not
+      # run (body is already streaming by the time they'd execute).
+
+      - path: /api/v1/events/{user_id}
+        method: GET
+        passthrough: true
+
+        # Request-phase plugins still run before the upstream call.
+        plugins:
+          - name: tenant_resolver
+            source: file
+            path: /etc/kono/plugins/
+            config:
+              header: X-Tenant-Id
+
+        upstreams:
+          - name: events
+            hosts: https://events.internal
+            path: /v1/users/{user_id}/events
+            timeout: 60s   # long-lived; remember server.timeout caps this
+            forward_headers: [ "Authorization", "Accept", "Last-Event-Id" ]
+            forward_params: [ "user_id" ]
+
+      # ── Example 5: bare minimum ──────────────────────────────────────────
+      # Single upstream, simplest possible flow.
+
+      - path: /api/v1/health-check
+        method: GET
+        aggregation:
+          strategy: array
+        upstreams:
+          - name: noop
+            hosts: https://example.com
+            path: /

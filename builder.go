@@ -229,11 +229,11 @@ func compileFlow(cfg FlowConfig, trustedProxies []*net.IPNet, metrics *metric.Me
 	var aggregationParams aggregation
 
 	if !cfg.Passthrough {
-		var err error
+		var initErr error
 
-		aggregationParams, err = initAggregation(*cfg.Aggregation, upstreams)
-		if err != nil {
-			return flow{}, fmt.Errorf("init aggregation: %w", err)
+		aggregationParams, initErr = initAggregation(*cfg.Aggregation, upstreams)
+		if initErr != nil {
+			return flow{}, fmt.Errorf("init aggregation: %w", initErr)
 		}
 	}
 
@@ -459,7 +459,7 @@ func buildUpstreamTransport(cfg UpstreamConfig, tlsCfg *tls.Config) (*http.Trans
 
 func buildUpstreamTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 	if !cfg.Enabled {
-		return nil, nil
+		return nil, nil //nolint:nilnil // its ok here
 	}
 
 	minVer, err := tlsutil.ParseVersion(cfg.MinVersion)
@@ -471,7 +471,7 @@ func buildUpstreamTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 		MinVersion:         minVer,
 		NextProtos:         []string{"h2", "http/1.1"},
 		ServerName:         cfg.ServerName,
-		InsecureSkipVerify: cfg.InsecureSkipVerify,
+		InsecureSkipVerify: cfg.InsecureSkipVerify, // #nosec G402
 	}
 
 	if cfg.CertFile != "" {
