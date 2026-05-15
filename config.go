@@ -36,16 +36,19 @@ type ServiceConfig struct {
 }
 
 type ServerConfig struct {
-	Port    int           `yaml:"port"    validate:"required,min=1,max=65535"`
-	Timeout time.Duration `yaml:"timeout" default:"5s"`
-	Pprof   PprofConfig   `yaml:"pprof"`
-	Metrics MetricsConfig `yaml:"metrics"`
-	Tracing TracingConfig `yaml:"tracing"`
+	Port          int             `yaml:"port"    validate:"required,min=1,max=65535"`
+	AdminPort     int             `yaml:"admin_port"  validate:"required,min=1,max=65535"`
+	AdminBindAddr string          `yaml:"admin_bind_addr"  default:"127.0.0.1"`
+	Timeout       time.Duration   `yaml:"timeout" default:"5s"`
+	HeaderTimeout time.Duration   `yaml:"header_timeout" default:"5s"`
+	Pprof         PprofConfig     `yaml:"pprof"`
+	Metrics       MetricsConfig   `yaml:"metrics"`
+	Tracing       TracingConfig   `yaml:"tracing"`
+	TLS           ServerTLSConfig `yaml:"tls"`
 }
 
 type PprofConfig struct {
 	Enabled bool `yaml:"enabled"`
-	Port    int  `yaml:"port" validate:"required_if=Enabled true,omitempty,min=1,max=65535"`
 }
 
 type MetricsConfig struct {
@@ -65,6 +68,15 @@ type OTLPConfig struct {
 	Endpoint string        `yaml:"endpoint"`
 	Insecure bool          `yaml:"insecure"`
 	Interval time.Duration `yaml:"interval"`
+}
+
+type ServerTLSConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	CertFile     string `yaml:"cert_file"      validate:"required_if=Enabled true"`
+	KeyFile      string `yaml:"key_file"       validate:"required_if=Enabled true"`
+	MinVersion   string `yaml:"min_version"    default:"1.2" validate:"omitempty,oneof=1.2 1.3"`
+	ClientAuth   string `yaml:"client_auth"    default:"none" validate:"omitempty,oneof=require optional none"`
+	ClientCAFile string `yaml:"client_ca_file" validate:"required_unless=ClientAuth none"`
 }
 
 type RoutingConfig struct {
@@ -116,6 +128,17 @@ type UpstreamConfig struct {
 
 	Policy    PolicyConfig    `yaml:"policy"`
 	Transport TransportConfig `yaml:"transport"`
+	TLS       TLSConfig       `yaml:"tls"`
+}
+
+type TLSConfig struct {
+	Enabled            bool   `yaml:"enabled"`
+	CertFile           string `yaml:"cert_file" validate:"required_with=KeyFile"`
+	KeyFile            string `yaml:"key_file" validate:"required_with=CertFile"`
+	CAFile             string `yaml:"ca_file"`
+	ServerName         string `yaml:"server_name"`
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify"`
+	MinVersion         string `yaml:"min_version" default:"1.2" validate:"omitempty,oneof=1.2 1.3"`
 }
 
 type TransportConfig struct {
@@ -217,6 +240,10 @@ func LoadConfig(path string) (Config, error) {
 
 	if err = v.Struct(&cfg); err != nil {
 		return Config{}, fmt.Errorf("invalid configuration:\n%w", formatValidationError(err))
+	}
+
+	if cfg.Gateway.Server.Port == cfg.Gateway.Server.AdminPort {
+		return Config{}, errors.New("server.port and server.admin_port must differ")
 	}
 
 	if err = validatePathParams(cfg); err != nil {

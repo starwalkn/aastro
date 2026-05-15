@@ -3,7 +3,9 @@ package kono
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -417,6 +419,172 @@ var _ = Describe("httpUpstream", func() {
 
 			r3 := up.call(context.Background(), req(), nil)
 			Expect(r3.err).ToNot(HaveOccurred())
+		})
+	})
+
+	Describe("Upstream TLS", func() {
+		var (
+			fx     *tlsFixture
+			server *httptest.Server
+		)
+
+		BeforeEach(func() {
+			fx = newTLSFixture()
+		})
+
+		AfterEach(func() {
+			if server != nil {
+				server.Close()
+			}
+		})
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		})
+
+		startServer := func(tlsConf *tls.Config) {
+			server = httptest.NewUnstartedServer(handler)
+			server.TLS = tlsConf
+			server.Config.ErrorLog = log.New(io.Discard, "", 0)
+			server.StartTLS()
+		}
+
+		doRequest := func(up *httpUpstream) *upstreamResponse {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			return up.call(context.Background(), req, nil)
+		}
+
+		Context("when server presents a cert signed by a trusted CA", func() {
+			It("completes the request successfully", func() {
+				startServer(&tls.Config{
+					Certificates: []tls.Certificate{fx.IssueServerCert()},
+				})
+
+				up := newTestUpstream(server.URL, withTLS(&tls.Config{
+					RootCAs: fx.CertPool(),
+				}))
+
+				resp := doRequest(up)
+
+				Expect(resp.err).ToNot(HaveOccurred())
+				Expect(resp.status).To(Equal(http.StatusOK))
+				Expect(string(resp.body)).To(Equal(`{"ok":true}`))
+			})
+		})
+
+		Context("when server presents a cert signed by an untrusted CA", func() {
+			It("fails the handshake with a connection error", func() {
+				startServer(&tls.Config{
+					Certificates: []tls.Certificate{fx.IssueServerCert()},
+				})
+
+				up := newTestUpstream(server.URL, withTLS(&tls.Config{
+					RootCAs: x509.NewCertPool(),
+				}))
+
+				resp := doRequest(up)
+
+				Expect(resp.err).To(HaveOccurred())
+				Expect(resp.err.kind).To(Equal(upstreamConnection))
+			})
+		})
+
+		Context("when the client opts into InsecureSkipVerify", func() {
+			It("succeeds even without a trusted CA in the pool", func() {
+				startServer(&tls.Config{
+					Certificates: []tls.Certificate{fx.IssueServerCert()},
+				})
+
+				up := newTestUpstream(server.URL, withTLS(&tls.Config{
+					InsecureSkipVerify: true,
+				}))
+
+				resp := doRequest(up)
+
+				Expect(resp.err).ToNot(HaveOccurred())
+				Expect(resp.status).To(Equal(http.StatusOK))
+			})
+		})
+
+		Context("when server requires mTLS and client provides a valid cert", func() {
+			It("completes the handshake and returns 200", func() {
+				startServer(&tls.Config{
+					Certificates: []tls.Certificate{fx.IssueServerCert()},
+					ClientAuth:   tls.RequireAndVerifyClientCert,
+					ClientCAs:    fx.CertPool(),
+				})
+
+				up := newTestUpstream(server.URL, withTLS(&tls.Config{
+					RootCAs:      fx.CertPool(),
+					Certificates: []tls.Certificate{fx.IssueClientCert("kono")},
+				}))
+
+				resp := doRequest(up)
+
+				Expect(resp.err).ToNot(HaveOccurred())
+				Expect(resp.status).To(Equal(http.StatusOK))
+			})
+		})
+
+		Context("when server requires mTLS but client omits its cert", func() {
+			It("is rejected on handshake", func() {
+				startServer(&tls.Config{
+					Certificates: []tls.Certificate{fx.IssueServerCert()},
+					ClientAuth:   tls.RequireAndVerifyClientCert,
+					ClientCAs:    fx.CertPool(),
+				})
+
+				up := newTestUpstream(server.URL, withTLS(&tls.Config{
+					RootCAs: fx.CertPool(),
+				}))
+
+				resp := doRequest(up)
+
+				Expect(resp.err).To(HaveOccurred())
+				Expect(resp.err.kind).To(Equal(upstreamConnection))
+			})
+		})
+
+		Context("when server requires mTLS but client presents a cert from a foreign CA", func() {
+			It("is rejected on handshake", func() {
+				rogue := newTLSFixture()
+
+				startServer(&tls.Config{
+					Certificates: []tls.Certificate{fx.IssueServerCert()},
+					ClientAuth:   tls.RequireAndVerifyClientCert,
+					ClientCAs:    fx.CertPool(),
+				})
+
+				up := newTestUpstream(server.URL, withTLS(&tls.Config{
+					RootCAs:      fx.CertPool(),
+					Certificates: []tls.Certificate{rogue.IssueClientCert("rogue")},
+				}))
+
+				resp := doRequest(up)
+
+				Expect(resp.err).To(HaveOccurred())
+				Expect(resp.err.kind).To(Equal(upstreamConnection))
+			})
+		})
+
+		Context("when client requires TLS 1.3 but server caps at 1.2", func() {
+			It("fails with a version mismatch", func() {
+				startServer(&tls.Config{
+					Certificates: []tls.Certificate{fx.IssueServerCert()},
+					MaxVersion:   tls.VersionTLS12,
+				})
+
+				up := newTestUpstream(server.URL, withTLS(&tls.Config{
+					RootCAs:    fx.CertPool(),
+					MinVersion: tls.VersionTLS13,
+				}))
+
+				resp := doRequest(up)
+
+				Expect(resp.err).To(HaveOccurred())
+				Expect(resp.err.kind).To(Equal(upstreamConnection))
+			})
 		})
 	})
 })

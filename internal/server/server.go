@@ -5,54 +5,116 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
+	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/starwalkn/kono"
 	"github.com/starwalkn/kono/internal/otelcommon"
 )
 
+const adminTimeout = 5 * time.Minute
+
 type Server struct {
-	http      *http.Server
-	router    *kono.Router
-	providers []otelcommon.Provider
-	log       *zap.Logger
+	dataServer  *http.Server
+	adminServer *http.Server
+	router      *kono.Router
+	providers   []otelcommon.Provider
+	log         *zap.Logger
+
+	shuttingDown *atomic.Bool
 }
 
 func New(ctx context.Context, cfg kono.GatewayConfig, version string, log *zap.Logger) (*Server, error) {
+	shuttingDown := &atomic.Bool{}
+
 	bundle, err := bootstrapRouter(ctx, cfg, version, log)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap router: %w", err)
 	}
 
-	handler := buildHandler(bundle)
+	tlsConfig, err := buildTLSConfig(cfg.Server.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("build server TLS config: %w", err)
+	}
+
+	stdLog := zap.NewStdLog(log)
 
 	return &Server{
-		http: &http.Server{
-			Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-			Handler:      handler,
-			ReadTimeout:  cfg.Server.Timeout,
-			WriteTimeout: cfg.Server.Timeout,
+		dataServer: &http.Server{
+			Addr:              fmt.Sprintf(":%d", cfg.Server.Port),
+			Handler:           buildHandler(bundle),
+			ReadTimeout:       cfg.Server.Timeout,
+			WriteTimeout:      cfg.Server.Timeout,
+			ReadHeaderTimeout: cfg.Server.HeaderTimeout,
+			TLSConfig:         tlsConfig,
+			ErrorLog:          stdLog,
 		},
-		router:    bundle.Router,
-		providers: []otelcommon.Provider{bundle.MeterProvider, bundle.TracerProvider},
-		log:       log,
+		adminServer: &http.Server{
+			Addr:              fmt.Sprintf("%s:%d", cfg.Server.AdminBindAddr, cfg.Server.AdminPort),
+			Handler:           buildAdminHandler(bundle, shuttingDown, cfg.Server.Pprof.Enabled),
+			ReadTimeout:       adminTimeout,
+			WriteTimeout:      adminTimeout,
+			ReadHeaderTimeout: cfg.Server.HeaderTimeout,
+			ErrorLog:          stdLog,
+		},
+		router:       bundle.Router,
+		providers:    []otelcommon.Provider{bundle.MeterProvider, bundle.TracerProvider},
+		log:          log,
+		shuttingDown: shuttingDown,
 	}, nil
 }
 
 func (s *Server) Start() error {
-	return s.http.ListenAndServe()
+	g := new(errgroup.Group)
+
+	g.Go(func() error {
+		err := s.startDataServer()
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+
+		return fmt.Errorf("data server: %w", err)
+	})
+
+	g.Go(func() error {
+		err := s.adminServer.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+
+		return fmt.Errorf("admin server: %w", err)
+	})
+
+	return g.Wait()
+}
+
+func (s *Server) startDataServer() error {
+	if s.dataServer.TLSConfig != nil {
+		return s.dataServer.ListenAndServeTLS("", "")
+	}
+
+	return s.dataServer.ListenAndServe()
 }
 
 // Stop drains the HTTP server, closes the router (middleware Closers), then
 // flushes observability providers. Order matters: HTTP first so no in-flight
 // request writes to a provider that is already shutting down.
 func (s *Server) Stop(ctx context.Context) error {
+	s.shuttingDown.Store(true)
+
 	var errs []error
 
-	if err := s.http.Shutdown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("http shutdown: %w", err))
+	if err := s.dataServer.Shutdown(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("data server shutdown: %w", err))
+	}
+
+	if err := s.adminServer.Shutdown(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("admin server shutdown: %w", err))
 	}
 
 	if err := s.router.Close(); err != nil {
@@ -86,16 +148,51 @@ func bootstrapRouter(ctx context.Context, cfg kono.GatewayConfig, version string
 func buildHandler(bundle kono.RouterBundle) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("GET /__health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	}))
+	mux.Handle("/", bundle.Router)
+
+	return mux
+}
+
+func buildAdminHandler(bundle kono.RouterBundle, shuttingDown *atomic.Bool, pprofEnabled bool) http.Handler {
+	mux := http.NewServeMux()
+
+	mux.Handle("GET /__health", livenessHandler())
+	mux.Handle("GET /__ready", readinessHandler(shuttingDown))
 
 	if bundle.PromRegistry != nil {
 		mux.Handle("/metrics", promhttp.HandlerFor(bundle.PromRegistry, promhttp.HandlerOpts{}))
 	}
 
-	mux.Handle("/", bundle.Router)
+	if pprofEnabled {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
 
 	return mux
+}
+
+func livenessHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "ok"}`))
+	})
+}
+
+func readinessHandler(shuttingDown *atomic.Bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if shuttingDown.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"shutting_down"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	})
 }

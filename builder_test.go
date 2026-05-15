@@ -270,8 +270,8 @@ var _ = Describe("builder", func() {
 					Timeout: 5 * time.Second,
 				}
 
-				u := buildUpstream(cfg, nil, nil, zap.NewNop())
-
+				u, err := buildUpstream(cfg, nil, nil, zap.NewNop())
+				Expect(err).NotTo(HaveOccurred())
 				Expect(u).NotTo(BeNil())
 				Expect(u.name()).To(Equal("get-test-service:7001-test-service:7002"))
 			})
