@@ -467,7 +467,7 @@ var _ = Describe("httpUpstream", func() {
 
 				resp := doRequest(up)
 
-				Expect(resp.err).To(BeNil())
+				Expect(resp.err).ToNot(HaveOccurred())
 				Expect(resp.status).To(Equal(http.StatusOK))
 				Expect(string(resp.body)).To(Equal(`{"ok":true}`))
 			})
@@ -485,7 +485,7 @@ var _ = Describe("httpUpstream", func() {
 
 				resp := doRequest(up)
 
-				Expect(resp.err).ToNot(BeNil())
+				Expect(resp.err).To(HaveOccurred())
 				Expect(resp.err.kind).To(Equal(upstreamConnection))
 			})
 		})
@@ -497,12 +497,12 @@ var _ = Describe("httpUpstream", func() {
 				})
 
 				up := newTestUpstream(server.URL, withTLS(&tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // intentional in this test
+					InsecureSkipVerify: true,
 				}))
 
 				resp := doRequest(up)
 
-				Expect(resp.err).To(BeNil())
+				Expect(resp.err).ToNot(HaveOccurred())
 				Expect(resp.status).To(Equal(http.StatusOK))
 			})
 		})
@@ -522,7 +522,7 @@ var _ = Describe("httpUpstream", func() {
 
 				resp := doRequest(up)
 
-				Expect(resp.err).To(BeNil())
+				Expect(resp.err).ToNot(HaveOccurred())
 				Expect(resp.status).To(Equal(http.StatusOK))
 			})
 		})
@@ -541,7 +541,7 @@ var _ = Describe("httpUpstream", func() {
 
 				resp := doRequest(up)
 
-				Expect(resp.err).ToNot(BeNil())
+				Expect(resp.err).To(HaveOccurred())
 				Expect(resp.err.kind).To(Equal(upstreamConnection))
 			})
 		})
@@ -563,7 +563,7 @@ var _ = Describe("httpUpstream", func() {
 
 				resp := doRequest(up)
 
-				Expect(resp.err).ToNot(BeNil())
+				Expect(resp.err).To(HaveOccurred())
 				Expect(resp.err.kind).To(Equal(upstreamConnection))
 			})
 		})
@@ -582,7 +582,7 @@ var _ = Describe("httpUpstream", func() {
 
 				resp := doRequest(up)
 
-				Expect(resp.err).ToNot(BeNil())
+				Expect(resp.err).To(HaveOccurred())
 				Expect(resp.err.kind).To(Equal(upstreamConnection))
 			})
 		})
