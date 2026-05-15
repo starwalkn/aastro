@@ -26,9 +26,11 @@ type Config struct {
 }
 
 type GatewayConfig struct {
-	Service ServiceConfig `yaml:"service"`
-	Server  ServerConfig  `yaml:"server"  validate:"required"`
-	Routing RoutingConfig `yaml:"routing" validate:"required"`
+	Service       ServiceConfig       `yaml:"service"`
+	Server        ServerConfig        `yaml:"server"  validate:"required"`
+	Admin         AdminConfig         `yaml:"admin" validate:"required"`
+	Observability ObservabilityConfig `yaml:"observability"`
+	Routing       RoutingConfig       `yaml:"routing" validate:"required"`
 }
 
 type ServiceConfig struct {
@@ -37,18 +39,22 @@ type ServiceConfig struct {
 
 type ServerConfig struct {
 	Port          int             `yaml:"port"    validate:"required,min=1,max=65535"`
-	AdminPort     int             `yaml:"admin_port"  validate:"required,min=1,max=65535"`
-	AdminBindAddr string          `yaml:"admin_bind_addr"  default:"127.0.0.1"`
 	Timeout       time.Duration   `yaml:"timeout" default:"5s"`
 	HeaderTimeout time.Duration   `yaml:"header_timeout" default:"5s"`
-	Pprof         PprofConfig     `yaml:"pprof"`
-	Metrics       MetricsConfig   `yaml:"metrics"`
-	Tracing       TracingConfig   `yaml:"tracing"`
 	TLS           ServerTLSConfig `yaml:"tls"`
 }
 
-type PprofConfig struct {
-	Enabled bool `yaml:"enabled"`
+type AdminConfig struct {
+	Port          int           `yaml:"port"    validate:"required,min=1,max=65535"`
+	BindAddr      string        `yaml:"bind_addr" default:"127.0.0.1"`
+	Timeout       time.Duration `yaml:"timeout"   default:"5m"`
+	HeaderTimeout time.Duration `yaml:"header_timeout" default:"5s"`
+	EnablePprof   bool          `yaml:"enable_pprof" default:"false"`
+}
+
+type ObservabilityConfig struct {
+	Tracing TracingConfig `yaml:"tracing"`
+	Metrics MetricsConfig `yaml:"metrics"`
 }
 
 type MetricsConfig struct {
@@ -242,8 +248,8 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid configuration:\n%w", formatValidationError(err))
 	}
 
-	if cfg.Gateway.Server.Port == cfg.Gateway.Server.AdminPort {
-		return Config{}, errors.New("server.port and server.admin_port must differ")
+	if cfg.Gateway.Server.Port == cfg.Gateway.Admin.Port {
+		return Config{}, errors.New("server.port and admin.port must differ")
 	}
 
 	if err = validatePathParams(cfg); err != nil {

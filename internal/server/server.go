@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"sync/atomic"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -16,8 +15,6 @@ import (
 	"github.com/starwalkn/kono"
 	"github.com/starwalkn/kono/internal/otelcommon"
 )
-
-const adminTimeout = 5 * time.Minute
 
 type Server struct {
 	dataServer  *http.Server
@@ -55,11 +52,11 @@ func New(ctx context.Context, cfg kono.GatewayConfig, version string, log *zap.L
 			ErrorLog:          stdLog,
 		},
 		adminServer: &http.Server{
-			Addr:              fmt.Sprintf("%s:%d", cfg.Server.AdminBindAddr, cfg.Server.AdminPort),
-			Handler:           buildAdminHandler(bundle, shuttingDown, cfg.Server.Pprof.Enabled),
-			ReadTimeout:       adminTimeout,
-			WriteTimeout:      adminTimeout,
-			ReadHeaderTimeout: cfg.Server.HeaderTimeout,
+			Addr:              fmt.Sprintf("%s:%d", cfg.Admin.BindAddr, cfg.Admin.Port),
+			Handler:           buildAdminHandler(bundle, shuttingDown, cfg.Admin.EnablePprof),
+			ReadTimeout:       cfg.Admin.Timeout,
+			WriteTimeout:      cfg.Admin.Timeout,
+			ReadHeaderTimeout: cfg.Admin.HeaderTimeout,
 			ErrorLog:          stdLog,
 		},
 		router:       bundle.Router,
@@ -135,8 +132,8 @@ func bootstrapRouter(ctx context.Context, cfg kono.GatewayConfig, version string
 		Routing:        cfg.Routing,
 		Service:        cfg.Service,
 		ServiceVersion: version,
-		Metrics:        cfg.Server.Metrics,
-		Tracing:        cfg.Server.Tracing,
+		Metrics:        cfg.Observability.Metrics,
+		Tracing:        cfg.Observability.Tracing,
 	}, log.Named("router"))
 	if err != nil {
 		return kono.RouterBundle{}, err
@@ -175,7 +172,7 @@ func buildAdminHandler(bundle kono.RouterBundle, shuttingDown *atomic.Bool, ppro
 }
 
 func livenessHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status": "ok"}`))
@@ -183,7 +180,7 @@ func livenessHandler() http.Handler {
 }
 
 func readinessHandler(shuttingDown *atomic.Bool) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if shuttingDown.Load() {
