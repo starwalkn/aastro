@@ -37,8 +37,6 @@ var hopByHopHeaders = map[string]struct{}{
 	"Transfer-Encoding":   {},
 	"Connection":          {},
 	"Trailer":             {},
-	"Date":                {},
-	"Server":              {},
 	"Keep-Alive":          {},
 	"Proxy-Authenticate":  {},
 	"Proxy-Authorization": {},
