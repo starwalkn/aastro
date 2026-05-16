@@ -7,7 +7,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.4.0] - YYYY-MM-DD
+## [0.4.0] - 2026-05-16
 
 ### ⚠️ Breaking Changes
 
@@ -164,6 +164,8 @@ corruption on edge paths. Allocation cost of a fresh WaitGroup per request is ne
 listener error and the main goroutine's shutdown path both wrote to the same `err`
 variable. Local variable inside the goroutine now passes the error exclusively through
 the channel.
+
+## [0.3.1] - 2026-05-11
 
 ### Added
 
