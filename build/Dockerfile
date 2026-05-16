@@ -15,15 +15,15 @@ ARG VERSION
 RUN make all GOOS=${TARGETOS} GOARCH=${TARGETARCH} VERSION=${VERSION}
 
 # Stage 2: Final minimal image
-FROM debian:12-slim AS runtime
+FROM chainguard/wolfi-base@sha256:0cff4df29a6597173dc8b813787318150141eb96ac783dc3ff4f5ff52c49a1e2 AS runtime
 
 COPY --from=builder /app/.bin/kono /usr/local/bin/kono
 
 COPY --from=builder /app/build/plugins /usr/local/lib/kono/plugins
 COPY --from=builder /app/build/middlewares /usr/local/lib/kono/middlewares
 
-RUN groupadd -r -g 1000 kono \
-    && useradd -r -u 1000 -g kono -s /sbin/nologin kono
+RUN addgroup -S -g 1000 kono \
+    && adduser -S -u 1000 -G kono -s /sbin/nologin -H kono
 
 EXPOSE 7805/tcp
 
