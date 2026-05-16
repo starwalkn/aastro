@@ -3,7 +3,6 @@ package kono
 import (
 	"encoding/json"
 	"net/http"
-	"slices"
 
 	"go.uber.org/zap"
 )
@@ -313,19 +312,26 @@ func (a *defaultAggregator) mapUpstreamError(err *upstreamError) ClientError {
 		return ClientErrAborted
 	case upstreamReadError, upstreamInternal:
 		return ClientErrInternal
+	case upstreamPolicyViolation:
+		return ClientErrUpstreamMalformed
 	default:
 		return ClientErrInternal
 	}
 }
 
 func dedupeErrors(errs []ClientError) []ClientError {
+	if len(errs) <= 1 {
+		return errs
+	}
+
+	seen := make(map[ClientError]struct{}, len(errs))
 	out := make([]ClientError, 0, len(errs))
 
 	for _, e := range errs {
-		if !slices.Contains(out, e) {
+		if _, ok := seen[e]; !ok {
+			seen[e] = struct{}{}
 			out = append(out, e)
 		}
 	}
-
 	return out
 }

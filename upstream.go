@@ -46,19 +46,26 @@ type upstreamError struct {
 }
 
 func (ue *upstreamError) Error() string { return string(ue.kind) }
-func (ue *upstreamError) Unwrap() error { return ue.err }
+func (ue *upstreamError) Unwrap() error {
+	if ue == nil {
+		return nil
+	}
+
+	return ue.err
+}
 
 type upstreamErrorKind string
 
 const (
-	upstreamTimeout      upstreamErrorKind = "timeout"
-	upstreamCanceled     upstreamErrorKind = "canceled"
-	upstreamConnection   upstreamErrorKind = "connection"
-	upstreamBadStatus    upstreamErrorKind = "bad_status"
-	upstreamReadError    upstreamErrorKind = "read_error"
-	upstreamBodyTooLarge upstreamErrorKind = "body_too_large"
-	upstreamCircuitOpen  upstreamErrorKind = "circuit_open"
-	upstreamInternal     upstreamErrorKind = "internal"
+	upstreamTimeout         upstreamErrorKind = "timeout"
+	upstreamCanceled        upstreamErrorKind = "canceled"
+	upstreamConnection      upstreamErrorKind = "connection"
+	upstreamBadStatus       upstreamErrorKind = "bad_status"
+	upstreamReadError       upstreamErrorKind = "read_error"
+	upstreamBodyTooLarge    upstreamErrorKind = "body_too_large"
+	upstreamCircuitOpen     upstreamErrorKind = "circuit_open"
+	upstreamInternal        upstreamErrorKind = "internal"
+	upstreamPolicyViolation upstreamErrorKind = "policy_violation"
 )
 
 type httpUpstream struct {
@@ -89,7 +96,7 @@ type upstreamConfig struct {
 }
 
 type upstreamState struct {
-	currentHostIdx    int64
+	currentHostIdx    uint64
 	activeConnections []int64
 }
 
@@ -198,7 +205,7 @@ func (u *httpUpstream) applyPolicy(ctx context.Context, resp *upstreamResponse) 
 
 	combined := errors.Join(errs...)
 	if resp.err == nil {
-		resp.err = &upstreamError{err: combined}
+		resp.err = &upstreamError{err: combined, kind: upstreamPolicyViolation}
 	} else {
 		resp.err.err = errors.Join(resp.err.err, combined)
 	}
@@ -215,7 +222,7 @@ func (u *httpUpstream) doCall(ctx context.Context, original *http.Request, origi
 		defer atomic.AddInt64(&u.state.activeConnections[selectedHost], -1)
 	}
 
-	req, err := u.newRequest(ctx, original, originalBody, u.cfg.hosts[selectedHost])
+	req, err := u.newRequest(ctx, original, originalBody, u.cfg.hosts[selectedHost], log)
 	if err != nil {
 		return &upstreamResponse{err: &upstreamError{kind: upstreamInternal, err: err}}
 	}
@@ -328,14 +335,14 @@ func (u *httpUpstream) isBreakerFailure(uerr *upstreamError) bool {
 	switch uerr.kind {
 	case upstreamTimeout, upstreamConnection, upstreamBadStatus:
 		return true
-	case upstreamCanceled, upstreamReadError, upstreamBodyTooLarge, upstreamCircuitOpen, upstreamInternal:
+	case upstreamCanceled, upstreamReadError, upstreamBodyTooLarge, upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
 		return false
 	default:
 		return false
 	}
 }
 
-func (u *httpUpstream) newRequest(ctx context.Context, original *http.Request, originalBody []byte, targetHost string) (*http.Request, error) {
+func (u *httpUpstream) newRequest(ctx context.Context, original *http.Request, originalBody []byte, targetHost string, log *zap.Logger) (*http.Request, error) {
 	path := expandPathParams(u.cfg.path, original)
 	path = strings.TrimPrefix(path, "/")
 
@@ -361,10 +368,7 @@ func (u *httpUpstream) newRequest(ctx context.Context, original *http.Request, o
 	}
 
 	u.resolveQueries(target, original)
-
-	if err = u.resolveHeaders(target, original); err != nil {
-		return nil, fmt.Errorf("cannot resolve headers: %w", err)
-	}
+	u.resolveHeaders(target, original, log)
 
 	return target, nil
 }
@@ -392,8 +396,10 @@ func (u *httpUpstream) selectHost(log *zap.Logger) int64 {
 
 	switch u.cfg.lbMode {
 	case lbModeRoundRobin:
-		idx := atomic.AddInt64(&u.state.currentHostIdx, 1)
-		selected = idx % int64(len(u.cfg.hosts))
+		idx := atomic.AddUint64(&u.state.currentHostIdx, 1)
+
+		// safe: idx % len is bounded by len(hosts) which is well within int64 range
+		selected = int64(idx % uint64(len(u.cfg.hosts))) //nolint:gosec // bounded by slice length
 	case lbModeLeastConns:
 		var minConns int64 = math.MaxInt64
 
@@ -449,7 +455,7 @@ func (u *httpUpstream) resolveQueries(target, original *http.Request) {
 	target.URL.RawQuery = targetQ.Encode()
 }
 
-func (u *httpUpstream) resolveHeaders(target, original *http.Request) error {
+func (u *httpUpstream) resolveHeaders(target, original *http.Request, log *zap.Logger) {
 	for _, pattern := range u.cfg.forwardHeaders {
 		if pattern == "*" {
 			target.Header = original.Header.Clone()
@@ -475,7 +481,8 @@ func (u *httpUpstream) resolveHeaders(target, original *http.Request) error {
 
 	parsedClientIP := net.ParseIP(clientIP)
 	if parsedClientIP == nil {
-		return fmt.Errorf("cannot parse client IP %q", clientIP)
+		log.Warn("cannot parse client IP, skipping forward headers", zap.String("client_ip", clientIP))
+		return
 	}
 
 	isTLS := original.TLS != nil
@@ -491,8 +498,6 @@ func (u *httpUpstream) resolveHeaders(target, original *http.Request) error {
 	} else {
 		u.appendTrustedForwardingHeaders(original, target, clientIP, proto, port)
 	}
-
-	return nil
 }
 
 func (u *httpUpstream) forwardHeadersByPrefix(target *http.Request, src http.Header, prefix string) {
@@ -611,10 +616,7 @@ func (u *httpUpstream) proxy(ctx context.Context, w http.ResponseWriter, origina
 	req.TransferEncoding = original.TransferEncoding
 
 	u.resolveQueries(req, original)
-
-	if err = u.resolveHeaders(req, original); err != nil {
-		return fmt.Errorf("resolve headers: %w", err)
-	}
+	u.resolveHeaders(req, original, u.log)
 
 	span := trace.SpanFromContext(ctx)
 	span.SetAttributes(

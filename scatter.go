@@ -28,10 +28,6 @@ type defaultScatter struct {
 	metrics *metric.Metrics
 }
 
-var wgPool = sync.Pool{
-	New: func() interface{} { return &sync.WaitGroup{} },
-}
-
 // scatter reads the original request body once, then fans out to all upstreams
 // concurrently, respecting the flow's parallelism semaphore.
 // Returns nil when the body is unreadable or exceeds maxBodySize —
@@ -58,7 +54,7 @@ func (d *defaultScatter) scatter(f *flow, original *http.Request) []upstreamResp
 
 	results := make([]upstreamResponse, len(f.upstreams))
 
-	wg := wgPool.Get().(*sync.WaitGroup)
+	var wg sync.WaitGroup
 	wg.Add(len(f.upstreams))
 
 	for i, u := range f.upstreams {
@@ -69,7 +65,6 @@ func (d *defaultScatter) scatter(f *flow, original *http.Request) []upstreamResp
 	}
 
 	wg.Wait()
-	wgPool.Put(wg)
 
 	return results
 }
