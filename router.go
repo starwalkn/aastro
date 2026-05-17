@@ -3,13 +3,11 @@ package kono
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"sort"
@@ -18,7 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/oklog/ulid/v2"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -441,14 +439,17 @@ func extractClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-var globalEntropy = ulid.Monotonic(rand.Reader, math.MaxInt64)
-
 func getOrCreateRequestID(r *http.Request) string {
 	if id := r.Header.Get("X-Request-ID"); id != "" {
 		return id
 	}
 
-	return strings.ToLower(ulid.MustNew(ulid.Timestamp(time.Now()), globalEntropy).String())
+	id, err := uuid.NewV7()
+	if err != nil {
+		return uuid.NewString()
+	}
+
+	return id.String()
 }
 
 func computeFingerprint(r *http.Request, flowPath string) string {
