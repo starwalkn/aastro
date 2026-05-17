@@ -8,7 +8,7 @@ A lightweight, modular, and high-performance <strong>API Gateway</strong> for mo
 Built with simplicity, performance, and developer-friendly configuration in mind.
 </p>
 
-[![Go Version](https://img.shields.io/badge/go-1.25.9-blue)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.26.3-blue)](https://golang.org)
 [![License](https://img.shields.io/github/license/starwalkn/kono)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/starwalkn/kono)](https://goreportcard.com/report/github.com/starwalkn/kono)
 [![codecov](https://codecov.io/gh/starwalkn/kono/branch/master/graph/badge.svg)](https://codecov.io/gh/starwalkn/kono)
