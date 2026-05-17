@@ -39,7 +39,7 @@ git clone https://github.com/starwalkn/kono.git
 cd kono
 
 make all GOOS=<YOUR_OS> GOARCH=<YOUR_ARCH>
-./bin/kono serve
+./bin/kono serve --config /path/to/config.yaml
 ```
 
 Or with Docker:
