@@ -216,7 +216,11 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 			return
 		}
 
-		finalResp := kctx.Response() //nolint:bodyclose // synthetic response, closed by defer above
+		finalResp := kctx.Response()
+		if finalResp != nil && finalResp != httpResp && finalResp.Body != nil {
+			defer func() { _ = finalResp.Body.Close() }()
+		}
+
 		if finalResp.Body != nil {
 			bodyBytes, _ := io.ReadAll(finalResp.Body)
 			finalResp.ContentLength = int64(len(bodyBytes))

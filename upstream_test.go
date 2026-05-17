@@ -37,7 +37,7 @@ var _ = Describe("httpUpstream", func() {
 				orig.RemoteAddr = "1.2.3.4:12345"
 				target, _ = http.NewRequest(orig.Method, orig.URL.String(), nil)
 
-				Expect(up.resolveHeaders(target, orig)).To(Succeed())
+				up.resolveHeaders(target, orig, zap.NewNop())
 
 				Expect(target.Header.Get("X-Forwarded-For")).To(Equal("1.2.3.4"))
 				Expect(target.Header.Get("X-Forwarded-Proto")).To(Equal("http"))
@@ -52,7 +52,7 @@ var _ = Describe("httpUpstream", func() {
 				orig.TLS = &tls.ConnectionState{}
 				target, _ = http.NewRequest(orig.Method, orig.URL.String(), nil)
 
-				Expect(up.resolveHeaders(target, orig)).To(Succeed())
+				up.resolveHeaders(target, orig, zap.NewNop())
 
 				Expect(target.Header.Get("X-Forwarded-For")).To(Equal("1.2.3.4"))
 				Expect(target.Header.Get("X-Forwarded-Proto")).To(Equal("https"))
@@ -65,7 +65,8 @@ var _ = Describe("httpUpstream", func() {
 				orig.Header.Set("X-Forwarded-For", "192.168.99.1")
 				target, _ = http.NewRequest(orig.Method, orig.URL.String(), nil)
 
-				Expect(up.resolveHeaders(target, orig)).To(Succeed())
+				up.resolveHeaders(target, orig, zap.NewNop())
+
 				Expect(target.Header.Get("X-Forwarded-For")).To(Equal("1.2.3.4"))
 			})
 		})
@@ -79,7 +80,7 @@ var _ = Describe("httpUpstream", func() {
 				orig.Header.Set("X-Forwarded-Port", "80")
 				target, _ = http.NewRequest(orig.Method, orig.URL.String(), nil)
 
-				Expect(up.resolveHeaders(target, orig)).To(Succeed())
+				up.resolveHeaders(target, orig, zap.NewNop())
 
 				Expect(target.Header.Get("X-Forwarded-For")).To(Equal("5.6.7.8, 10.0.1.5"))
 				Expect(target.Header.Get("X-Forwarded-Proto")).To(Equal("http"))
@@ -94,7 +95,8 @@ var _ = Describe("httpUpstream", func() {
 				orig.Header.Set("X-Forwarded-Proto", "ftp")
 				target, _ = http.NewRequest(orig.Method, orig.URL.String(), nil)
 
-				Expect(up.resolveHeaders(target, orig)).To(Succeed())
+				up.resolveHeaders(target, orig, zap.NewNop())
+
 				Expect(target.Header.Get("X-Forwarded-Proto")).To(Equal("http"))
 			})
 
@@ -104,7 +106,8 @@ var _ = Describe("httpUpstream", func() {
 				orig.Header.Set("X-Forwarded-Port", "99999")
 				target, _ = http.NewRequest(orig.Method, orig.URL.String(), nil)
 
-				Expect(up.resolveHeaders(target, orig)).To(Succeed())
+				up.resolveHeaders(target, orig, zap.NewNop())
+
 				Expect(target.Header.Get("X-Forwarded-Port")).To(Equal("80"))
 			})
 		})

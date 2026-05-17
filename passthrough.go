@@ -17,7 +17,7 @@ import (
 	"github.com/starwalkn/kono/sdk"
 )
 
-const streamBuffer = 4096
+const streamBuffer = 16 * 1024
 
 type proxyCapable interface {
 	proxy(ctx context.Context, w http.ResponseWriter, original *http.Request) error
@@ -123,7 +123,7 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 }
 
 // streamCopy copies src to dst, flushing after each read if the writer supports it.
-// buf size of 4 KiB is intentional: small enough for SSE events, large enough for chunked blobs.
+// buf size of 16 KiB is intentional: small enough for SSE events, large enough for chunked blobs.
 func streamCopy(dst http.ResponseWriter, src io.Reader) error {
 	flusher, canFlush := dst.(http.Flusher)
 
