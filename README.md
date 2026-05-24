@@ -47,8 +47,8 @@ Or with Docker:
 ```bash
 docker run \
   -p 7805:7805 \
-  -v $(pwd)/kono.yaml:/app/kono.yaml \
-  -e KONO_CONFIG=/app/kono.yaml \
+  -v $(pwd)/kono.yaml:/etc/kono/kono.yaml \
+  -e KONO_CONFIG=/etc/kono/kono.yaml \
   starwalkn/kono:latest
 ```
 
