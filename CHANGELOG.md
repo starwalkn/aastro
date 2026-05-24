@@ -7,6 +7,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.4.1] - 2026-05-24
+
+### Changed
+
+Changed final image to chainguard/wolfi-base
+
+### Fixed
+
+Used UUID v7 instead of ULID for request id
+
 ## [0.4.0] - 2026-05-16
 
 ### ⚠️ Breaking Changes

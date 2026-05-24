@@ -628,7 +628,7 @@ func (u *httpUpstream) proxy(ctx context.Context, w http.ResponseWriter, origina
 
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
-	resp, err := u.streamClient.Do(req)
+	resp, err := u.streamClient.Do(req) // #nosec G704
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "passthrough upstream call failed")
