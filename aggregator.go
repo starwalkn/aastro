@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"encoding/json"

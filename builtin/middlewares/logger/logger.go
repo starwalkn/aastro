@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/internal/logger"
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/internal/logger"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 type Middleware struct {

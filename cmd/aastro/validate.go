@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/starwalkn/kono"
+	"github.com/starwalkn/aastro"
 )
 
 var validateCmd = &cobra.Command{
@@ -38,7 +38,7 @@ func runValidate() error {
 		cfgPath = fallbackConfigPath
 	}
 
-	_, err := kono.LoadConfig(cfgPath)
+	_, err := aastro.LoadConfig(cfgPath)
 	if err != nil {
 		return err
 	}

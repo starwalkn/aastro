@@ -1,4 +1,4 @@
-# Stage 1: Build Go kono binary
+# Stage 1: Build Go aastro binary
 FROM golang:1.26.3-bookworm AS builder
 
 WORKDIR /app
@@ -17,19 +17,19 @@ RUN make all GOOS=${TARGETOS} GOARCH=${TARGETARCH} VERSION=${VERSION}
 # Stage 2: Final minimal image
 FROM chainguard/wolfi-base@sha256:0cff4df29a6597173dc8b813787318150141eb96ac783dc3ff4f5ff52c49a1e2 AS runtime
 
-COPY --from=builder /app/.bin/kono /usr/local/bin/kono
+COPY --from=builder /app/.bin/aastro /usr/local/bin/aastro
 
-COPY --from=builder /app/build/plugins /usr/local/lib/kono/plugins
-COPY --from=builder /app/build/middlewares /usr/local/lib/kono/middlewares
+COPY --from=builder /app/build/plugins /usr/local/lib/aastro/plugins
+COPY --from=builder /app/build/middlewares /usr/local/lib/aastro/middlewares
 
-RUN addgroup -S -g 1000 kono \
-    && adduser -S -u 1000 -G kono -s /sbin/nologin -H kono
+RUN addgroup -S -g 1000 aastro \
+    && adduser -S -u 1000 -G aastro -s /sbin/nologin -H aastro
 
 EXPOSE 7805/tcp
 
 STOPSIGNAL SIGTERM
 
-USER kono:kono
+USER aastro:aastro
 
-ENTRYPOINT ["kono"]
+ENTRYPOINT ["aastro"]
 CMD ["serve"]

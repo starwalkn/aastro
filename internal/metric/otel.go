@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
-const MeterName = "kono"
+const MeterName = "aastro"
 
 const defaultMetricsInterval = 60 * time.Second
 
@@ -44,7 +44,7 @@ func New() (*Metrics, error) {
 
 	var err error
 
-	m.requestsTotal, err = meter.Int64Counter("kono.requests.total",
+	m.requestsTotal, err = meter.Int64Counter("aastro.requests.total",
 		otelmetric.WithDescription("Total number of incoming requests"),
 	)
 	if err != nil {
@@ -52,7 +52,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.requestsDuration, err = meter.Float64Histogram(
-		"kono.requests.duration",
+		"aastro.requests.duration",
 		otelmetric.WithDescription("End-to-end request duration in seconds"),
 		otelmetric.WithUnit("s"),
 	)
@@ -61,7 +61,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.requestsInFlight, err = meter.Int64UpDownCounter(
-		"kono.requests.in_flight",
+		"aastro.requests.in_flight",
 		otelmetric.WithDescription("Current number of in-flight requests"),
 	)
 	if err != nil {
@@ -69,7 +69,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.failedRequestsTotal, err = meter.Int64Counter(
-		"kono.failed_requests.total",
+		"aastro.failed_requests.total",
 		otelmetric.WithDescription("Total number of requests rejected before flow processing"),
 	)
 	if err != nil {
@@ -77,7 +77,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.upstreamLatency, err = meter.Float64Histogram(
-		"kono.upstream.latency",
+		"aastro.upstream.latency",
 		otelmetric.WithDescription("Upstream response latency in seconds"),
 		otelmetric.WithUnit("s"),
 	)
@@ -86,7 +86,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.upstreamRequestsTotal, err = meter.Int64Counter(
-		"kono.upstream.requests.total",
+		"aastro.upstream.requests.total",
 		otelmetric.WithDescription("Total number of requests dispatched to upstreams"),
 	)
 	if err != nil {
@@ -94,7 +94,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.upstreamErrorsTotal, err = meter.Int64Counter(
-		"kono.upstream.errors.total",
+		"aastro.upstream.errors.total",
 		otelmetric.WithDescription("Total number of upstream errors by kind"),
 	)
 	if err != nil {
@@ -102,7 +102,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.upstreamRetriesTotal, err = meter.Int64Counter(
-		"kono.upstream.retries.total",
+		"aastro.upstream.retries.total",
 		otelmetric.WithDescription("Total number of upstream retry attempts"),
 	)
 	if err != nil {
@@ -110,7 +110,7 @@ func New() (*Metrics, error) {
 	}
 
 	m.circuitBreakerState, err = meter.Float64Gauge(
-		"kono.circuit_breaker.state",
+		"aastro.circuit_breaker.state",
 		otelmetric.WithDescription("Circuit breaker state: 0=closed, 1=open, 2=half-open"),
 	)
 	if err != nil {
@@ -170,7 +170,7 @@ func newMeterProvider(reader sdkmetric.Reader, res *resource.Resource) *sdkmetri
 		sdkmetric.WithReader(reader),
 		sdkmetric.WithView(
 			sdkmetric.NewView(
-				sdkmetric.Instrument{Name: "kono.requests.duration"},
+				sdkmetric.Instrument{Name: "aastro.requests.duration"},
 				sdkmetric.Stream{
 					Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
 						Boundaries: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5},
@@ -178,7 +178,7 @@ func newMeterProvider(reader sdkmetric.Reader, res *resource.Resource) *sdkmetri
 				},
 			),
 			sdkmetric.NewView(
-				sdkmetric.Instrument{Name: "kono.upstream.latency"},
+				sdkmetric.Instrument{Name: "aastro.upstream.latency"},
 				sdkmetric.Stream{
 					Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
 						Boundaries: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},

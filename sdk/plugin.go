@@ -29,7 +29,7 @@ type PluginInfo struct {
 	Author      string
 }
 
-// Plugin is the interface that all Kono plugins must implement.
+// Plugin is the interface that all Aastro plugins must implement.
 // Plugins are loaded as Go shared objects (.so) and must be compiled
 // with the exact same Go version as the gateway binary.
 type Plugin interface {

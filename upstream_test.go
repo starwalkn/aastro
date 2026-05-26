@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/internal/circuitbreaker"
+	"github.com/starwalkn/aastro/internal/circuitbreaker"
 )
 
 var _ = Describe("httpUpstream", func() {
@@ -520,7 +520,7 @@ var _ = Describe("httpUpstream", func() {
 
 				up := newTestUpstream(server.URL, withTLS(&tls.Config{
 					RootCAs:      fx.CertPool(),
-					Certificates: []tls.Certificate{fx.IssueClientCert("kono")},
+					Certificates: []tls.Certificate{fx.IssueClientCert("aastro")},
 				}))
 
 				resp := doRequest(up)

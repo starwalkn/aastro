@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"context"
@@ -14,7 +14,7 @@ var _ = Describe("builder", func() {
 	Describe("NewRouter", func() {
 		It("builds a complete bundle from a minimal config", func() {
 			cfg := RoutingConfigSet{
-				Service: ServiceConfig{Name: "kono-test"},
+				Service: ServiceConfig{Name: "aastro-test"},
 				Routing: RoutingConfig{
 					Flows: []FlowConfig{{
 						Path:        "/test",
@@ -35,7 +35,7 @@ var _ = Describe("builder", func() {
 
 		It("returns an error if a flow fails to compile", func() {
 			cfg := RoutingConfigSet{
-				Service: ServiceConfig{Name: "kono-test"},
+				Service: ServiceConfig{Name: "aastro-test"},
 				Routing: RoutingConfig{
 					Flows: []FlowConfig{{
 						Path:        "/bad",

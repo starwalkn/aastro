@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 type Middleware struct {

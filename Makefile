@@ -12,7 +12,7 @@ all: clean build plugins
 
 build:
 	mkdir -p .bin
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -trimpath -o .bin/kono ./cmd/kono
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -trimpath -o .bin/aastro ./cmd/aastro
 
 plugins:
 	mkdir -p $(PLUGIN_OUT)

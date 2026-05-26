@@ -14,7 +14,7 @@ import (
 const (
 	defaultBatchTimeout = 5 * time.Second
 
-	TracerName = "kono"
+	TracerName = "aastro"
 )
 
 // NewOtelOTLP initializes an OTLP/HTTP trace exporter with a batching span processor,

@@ -4,11 +4,11 @@ import (
 	"crypto/tls"
 	"fmt"
 
-	"github.com/starwalkn/kono"
-	"github.com/starwalkn/kono/internal/tlsutil"
+	"github.com/starwalkn/aastro"
+	"github.com/starwalkn/aastro/internal/tlsutil"
 )
 
-func buildTLSConfig(cfg kono.ServerTLSConfig) (*tls.Config, error) {
+func buildTLSConfig(cfg aastro.ServerTLSConfig) (*tls.Config, error) {
 	if !cfg.Enabled {
 		return nil, nil //nolint:nilnil // its ok here
 	}

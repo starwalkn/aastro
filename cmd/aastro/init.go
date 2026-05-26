@@ -25,7 +25,7 @@ type pluginInitFlags struct {
 
 var pluginCmd = &cobra.Command{
 	Use:   "plugin",
-	Short: "Manage Kono plugins",
+	Short: "Manage Aastro plugins",
 }
 
 func init() {

@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"bytes"
@@ -24,10 +24,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/internal/metric"
-	"github.com/starwalkn/kono/internal/ratelimit"
-	"github.com/starwalkn/kono/internal/tracing"
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/internal/metric"
+	"github.com/starwalkn/aastro/internal/ratelimit"
+	"github.com/starwalkn/aastro/internal/tracing"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 var hopByHopHeaders = map[string]struct{}{
@@ -88,7 +88,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	tracer := otel.Tracer(tracing.TracerName)
 
 	ctx := otel.GetTextMapPropagator().Extract(req.Context(), propagation.HeaderCarrier(req.Header))
-	ctx, span := tracer.Start(ctx, "kono.request",
+	ctx, span := tracer.Start(ctx, "aastro.request",
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
 			attribute.String("http.method", req.Method),
@@ -160,8 +160,8 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 		req = req.WithContext(ctx)
 
 		span.SetAttributes(
-			attribute.String("kono.request.id", requestID),
-			attribute.String("kono.request.fingerprint", fingerprint),
+			attribute.String("aastro.request.id", requestID),
+			attribute.String("aastro.request.fingerprint", fingerprint),
 		)
 
 		log := r.log.With(
@@ -253,10 +253,10 @@ func (r *Router) executePlugins(pluginType sdk.PluginType, w http.ResponseWriter
 			zap.String("name", p.Info().Name),
 		)
 
-		ctx, span := tracer.Start(kctx.Request().Context(), "kono.plugin",
+		ctx, span := tracer.Start(kctx.Request().Context(), "aastro.plugin",
 			trace.WithAttributes(
-				attribute.String("kono.plugin.name", p.Info().Name),
-				attribute.String("kono.plugin.type", pluginType.String()),
+				attribute.String("aastro.plugin.name", p.Info().Name),
+				attribute.String("aastro.plugin.type", pluginType.String()),
 			),
 		)
 

@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"context"
@@ -21,8 +21,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/starwalkn/kono/internal/circuitbreaker"
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/internal/circuitbreaker"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 // ── Config helpers ────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ func newTLSFixture() *tlsFixture {
 
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "kono-test-ca"},
+		Subject:               pkix.Name{CommonName: "aastro-test-ca"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		IsCA:                  true,

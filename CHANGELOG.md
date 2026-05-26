@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Kono are documented here.
+All notable changes to Aastro are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/).
@@ -88,10 +88,10 @@ gateway:
   server:
     tls:
       enabled: true
-      cert_file: /etc/kono/server.crt
-      key_file:  /etc/kono/server.key
+      cert_file: /etc/aastro/server.crt
+      key_file:  /etc/aastro/server.key
       client_auth: require        # none | optional | require
-      client_ca_file: /etc/kono/client-ca.crt
+      client_ca_file: /etc/aastro/client-ca.crt
       min_version: "1.2"
 
   routing:
@@ -99,9 +99,9 @@ gateway:
       - upstreams:
           - tls:
               enabled: true
-              cert_file: /etc/kono/clients/users.crt
-              key_file:  /etc/kono/clients/users.key
-              ca_file:   /etc/kono/internal-ca.crt
+              cert_file: /etc/aastro/clients/users.crt
+              key_file:  /etc/aastro/clients/users.key
+              ca_file:   /etc/aastro/internal-ca.crt
               server_name: user-service.internal
 ```
 
@@ -137,7 +137,7 @@ explicitly if Prometheus scrapes from outside the pod network.
 
 **`/metrics` endpoint moved to the admin port.** When `metrics.exporter: prometheus`,
 the endpoint is now served on `admin.port` rather than the data port. This means
-Prometheus can scrape Kono over plain HTTP without needing a client certificate, even
+Prometheus can scrape Aastro over plain HTTP without needing a client certificate, even
 when the data port enforces mTLS.
 
 **Health probe response format changed.** `/__health` now returns
@@ -197,9 +197,9 @@ the channel.
 - Distributed tracing via OpenTelemetry OTLP/HTTP (`gateway.server.tracing` config block)
 - Service identity via `gateway.service.name` config and `-ldflags "-X main.version=…"` injection
 - W3C TraceContext + Baggage propagation, installed unconditionally
-- `X-Request-Fingerprint` response header and `kono.request.fingerprint` span attribute for correlation across
+- `X-Request-Fingerprint` response header and `aastro.request.fingerprint` span attribute for correlation across
   observability channels
-- `kono plugin init` CLI command to create a plugin or middleware skeleton
+- `aastro plugin init` CLI command to create a plugin or middleware skeleton
 
 ### Changed
 
@@ -229,15 +229,15 @@ the channel.
   `{"profile": {...}, "stats": {...}}`.
 - **Response meta envelope** - all gateway responses now include a `meta` object with `request_id` (ULID) and `partial`
   flag alongside `data` and `errors`.
-- **`kono viz` command** - CLI command that renders a visual tree of all configured flows and upstreams using terminal
+- **`aastro viz` command** - CLI command that renders a visual tree of all configured flows and upstreams using terminal
   color output.
 - **JWKS background refresh** - the `auth` middleware now refreshes JWKS keys in the background on a configurable
   interval (`jwks_refresh_interval`, default 5m), reducing on-demand refresh latency during key rotation.
-- **`sdk.Closer` interface** - middlewares that hold background resources can implement `Close() error`. Kono calls it
+- **`sdk.Closer` interface** - middlewares that hold background resources can implement `Close() error`. Aastro calls it
   on shutdown via `Router.Close()`.
 - **Configuration defaults via struct tags** - upstream timeouts, transport pool settings, and server timeout now use
   `default:` tags powered by `creasty/defaults`, eliminating the manual `ensureGatewayDefaults` function.
-- **`kono validate` command** - validates the configuration file and reports human-readable field-level errors without
+- **`aastro validate` command** - validates the configuration file and reports human-readable field-level errors without
   starting the gateway.
 - **Full hop-by-hop header filtering** - `Keep-Alive`, `TE`, `Proxy-Authenticate`, `Proxy-Authorization`, and `Upgrade`
   are now stripped from proxied responses in addition to the previously filtered headers.

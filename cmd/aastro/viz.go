@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/starwalkn/kono"
+	"github.com/starwalkn/aastro"
 )
 
 var vizCmd = &cobra.Command{
@@ -23,7 +23,7 @@ var vizCmd = &cobra.Command{
 			cfgPath = fallbackConfigPath
 		}
 
-		cfg, err := kono.LoadConfig(cfgPath)
+		cfg, err := aastro.LoadConfig(cfgPath)
 		if err != nil {
 			return err
 		}
@@ -62,47 +62,47 @@ var (
 	}
 
 	styleStrategy = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("117")).
-			Faint(true)
+		Foreground(lipgloss.Color("117")).
+		Faint(true)
 
 	stylePassthrough = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")).
-				Bold(true)
+		Foreground(lipgloss.Color("214")).
+		Bold(true)
 
 	styleUpstream = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("111"))
+		Bold(true).
+		Foreground(lipgloss.Color("111"))
 
 	styleMeta = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243"))
+		Foreground(lipgloss.Color("243"))
 
 	styleCB = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("203"))
 
 	styleLabel = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Width(labelColumnWidth)
+		Foreground(lipgloss.Color("240")).
+		Width(labelColumnWidth)
 
 	styleNames = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("183"))
+		Foreground(lipgloss.Color("183"))
 
 	styleHeader = lipgloss.NewStyle().
-			Bold(true).
-			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("255")).
-			Padding(0, 1)
+		Bold(true).
+		Background(lipgloss.Color("235")).
+		Foreground(lipgloss.Color("255")).
+		Padding(0, 1)
 
 	styleHeaderMeta = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")).
-			Padding(0, 1)
+		Foreground(lipgloss.Color("243")).
+		Padding(0, 1)
 )
 
 type viz struct {
-	cfg kono.Config
+	cfg aastro.Config
 	sb  strings.Builder
 }
 
-func newViz(cfg kono.Config) *viz {
+func newViz(cfg aastro.Config) *viz {
 	return &viz{cfg: cfg}
 }
 
@@ -124,7 +124,7 @@ func (v *viz) render() {
 	fmt.Print(v.sb.String())
 }
 
-func (v *viz) renderHeader(routing kono.RoutingConfig) {
+func (v *viz) renderHeader(routing aastro.RoutingConfig) {
 	count := fmt.Sprintf("%d flow", len(routing.Flows))
 	if len(routing.Flows) != 1 {
 		count += "s"
@@ -142,7 +142,7 @@ func (v *viz) renderHeader(routing kono.RoutingConfig) {
 	)
 }
 
-func (v *viz) renderFlow(f kono.FlowConfig) {
+func (v *viz) renderFlow(f aastro.FlowConfig) {
 	method := v.methodBadge(f.Method)
 	path := "  " + method + "  " + stylePath.Render(f.Path)
 
@@ -156,11 +156,11 @@ func (v *viz) renderFlow(f kono.FlowConfig) {
 
 	indent := "  "
 
-	if names := collectNames(f.Plugins, func(p kono.PluginConfig) string { return p.Name }); names != "" {
+	if names := collectNames(f.Plugins, func(p aastro.PluginConfig) string { return p.Name }); names != "" {
 		fmt.Println(indent + styleLabel.Render("plugins") + styleNames.Render(names))
 	}
 
-	if names := collectNames(f.Middlewares, func(m kono.MiddlewareConfig) string { return m.Name }); names != "" {
+	if names := collectNames(f.Middlewares, func(m aastro.MiddlewareConfig) string { return m.Name }); names != "" {
 		fmt.Println(indent + styleLabel.Render("middlewares") + styleNames.Render(names))
 	}
 
@@ -174,7 +174,7 @@ func (v *viz) renderFlow(f kono.FlowConfig) {
 	}
 }
 
-func (v *viz) renderUpstream(u kono.UpstreamConfig, last bool) {
+func (v *viz) renderUpstream(u aastro.UpstreamConfig, last bool) {
 	connector := "  ├─◉ "
 	hostIndent := "  │   "
 	if last {
@@ -222,7 +222,7 @@ func (v *viz) methodBadge(method string) string {
 		Render(method)
 }
 
-func (v *viz) strategyLabel(f kono.FlowConfig) string {
+func (v *viz) strategyLabel(f aastro.FlowConfig) string {
 	s := f.Aggregation.Strategy
 
 	if f.Aggregation.BestEffort {
@@ -236,7 +236,7 @@ func (v *viz) strategyLabel(f kono.FlowConfig) string {
 	return s
 }
 
-func (v *viz) upstreamMeta(u kono.UpstreamConfig) string {
+func (v *viz) upstreamMeta(u aastro.UpstreamConfig) string {
 	var parts []string
 
 	if mode := u.Policy.LoadBalancingConfig.Mode; mode != "" {

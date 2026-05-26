@@ -6,13 +6,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const fallbackConfigPath = "/etc/kono/config.yaml"
+const fallbackConfigPath = "/etc/aastro/config.yaml"
 
 var cfgPath string
 
 var rootCmd = &cobra.Command{
-	Use:   "kono",
-	Short: "Kono API Gateway",
+	Use:   "aastro",
+	Short: "Aastro API Gateway",
 }
 
 func Execute() {

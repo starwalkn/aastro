@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/starwalkn/kono/internal/circuitbreaker"
+	"github.com/starwalkn/aastro/internal/circuitbreaker"
 )
 
 const defaultParallelUpstreams = 10

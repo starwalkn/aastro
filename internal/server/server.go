@@ -12,21 +12,21 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/starwalkn/kono"
-	"github.com/starwalkn/kono/internal/otelcommon"
+	"github.com/starwalkn/aastro"
+	"github.com/starwalkn/aastro/internal/otelcommon"
 )
 
 type Server struct {
 	dataServer  *http.Server
 	adminServer *http.Server
-	router      *kono.Router
+	router      *aastro.Router
 	providers   []otelcommon.Provider
 	log         *zap.Logger
 
 	shuttingDown *atomic.Bool
 }
 
-func New(ctx context.Context, cfg kono.GatewayConfig, version string, log *zap.Logger) (*Server, error) {
+func New(ctx context.Context, cfg aastro.GatewayConfig, version string, log *zap.Logger) (*Server, error) {
 	shuttingDown := &atomic.Bool{}
 
 	bundle, err := bootstrapRouter(ctx, cfg, version, log)
@@ -127,8 +127,8 @@ func (s *Server) Stop(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func bootstrapRouter(ctx context.Context, cfg kono.GatewayConfig, version string, log *zap.Logger) (kono.RouterBundle, error) {
-	bundle, err := kono.NewRouter(ctx, kono.RoutingConfigSet{
+func bootstrapRouter(ctx context.Context, cfg aastro.GatewayConfig, version string, log *zap.Logger) (aastro.RouterBundle, error) {
+	bundle, err := aastro.NewRouter(ctx, aastro.RoutingConfigSet{
 		Routing:        cfg.Routing,
 		Service:        cfg.Service,
 		ServiceVersion: version,
@@ -136,13 +136,13 @@ func bootstrapRouter(ctx context.Context, cfg kono.GatewayConfig, version string
 		Tracing:        cfg.Observability.Tracing,
 	}, log.Named("router"))
 	if err != nil {
-		return kono.RouterBundle{}, err
+		return aastro.RouterBundle{}, err
 	}
 
 	return bundle, nil
 }
 
-func buildHandler(bundle kono.RouterBundle) http.Handler {
+func buildHandler(bundle aastro.RouterBundle) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("/", bundle.Router)
@@ -150,7 +150,7 @@ func buildHandler(bundle kono.RouterBundle) http.Handler {
 	return mux
 }
 
-func buildAdminHandler(bundle kono.RouterBundle, shuttingDown *atomic.Bool, pprofEnabled bool) http.Handler {
+func buildAdminHandler(bundle aastro.RouterBundle, shuttingDown *atomic.Bool, pprofEnabled bool) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /__health", livenessHandler())

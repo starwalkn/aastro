@@ -1,4 +1,4 @@
-<h1 align="center">Kono API Gateway</h1>
+<h1 align="center">Aastro API Gateway</h1>
 
 <p align="center">
 A lightweight, modular, and high-performance <strong>API Gateway</strong> for modern microservices.
@@ -9,12 +9,12 @@ Built with simplicity, performance, and developer-friendly configuration in mind
 </p>
 
 [![Go Version](https://img.shields.io/badge/go-1.26.3-blue)](https://golang.org)
-[![License](https://img.shields.io/github/license/starwalkn/kono)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/starwalkn/kono)](https://goreportcard.com/report/github.com/starwalkn/kono)
-[![codecov](https://codecov.io/gh/starwalkn/kono/branch/master/graph/badge.svg)](https://codecov.io/gh/starwalkn/kono)
-![Docker Pulls](https://img.shields.io/docker/pulls/starwalkn/kono)
-![GitHub Created At](https://img.shields.io/github/created-at/starwalkn/kono)
-[![GitHub release](https://img.shields.io/github/v/release/starwalkn/kono)](https://github.com/starwalkn/kono/releases)
+[![License](https://img.shields.io/github/license/starwalkn/aastro)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/starwalkn/aastro)](https://goreportcard.com/report/github.com/starwalkn/aastro)
+[![codecov](https://codecov.io/gh/starwalkn/aastro/branch/master/graph/badge.svg)](https://codecov.io/gh/starwalkn/aastro)
+![Docker Pulls](https://img.shields.io/docker/pulls/starwalkn/aastro)
+![GitHub Created At](https://img.shields.io/github/created-at/starwalkn/aastro)
+[![GitHub release](https://img.shields.io/github/v/release/starwalkn/aastro)](https://github.com/starwalkn/aastro/releases)
 
 ---
 
@@ -35,11 +35,11 @@ Built with simplicity, performance, and developer-friendly configuration in mind
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/starwalkn/kono.git
-cd kono
+git clone https://github.com/starwalkn/aastro.git
+cd aastro
 
 make all GOOS=<YOUR_OS> GOARCH=<YOUR_ARCH>
-./bin/kono serve --config /path/to/config.yaml
+./bin/aastro serve --config /path/to/config.yaml
 ```
 
 Or with Docker:
@@ -47,9 +47,9 @@ Or with Docker:
 ```bash
 docker run \
   -p 7805:7805 \
-  -v $(pwd)/kono.yaml:/app/kono.yaml \
-  -e KONO_CONFIG=/app/kono.yaml \
-  starwalkn/kono:latest
+  -v $(pwd)/aastro.yaml:/app/aastro.yaml \
+  -e KONO_CONFIG=/app/aastro.yaml \
+  starwalkn/aastro:latest
 ```
 
 ---
@@ -58,7 +58,7 @@ docker run \
 
 Full documentation, configuration reference, and plugin guide are available at:
 
-**[starwalkn.github.io/konodocs](https://starwalkn.github.io/konodocs/)**
+**[starwalkn.github.io/aastrodocs](https://starwalkn.github.io/aastrodocs/)**
 
 ---
 

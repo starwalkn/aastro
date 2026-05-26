@@ -15,8 +15,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/internal/logger"
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/internal/logger"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 type ctxKeyClaims struct{}
@@ -58,7 +58,7 @@ const (
 	defaultLeeway        = 5 * time.Second
 	authHeaderPartsCount = 2
 
-	defaultRealm     = "kono"
+	defaultRealm     = "aastro"
 	bearerAuthScheme = "Bearer"
 
 	authErrorInvalidRequest = "invalid_request"

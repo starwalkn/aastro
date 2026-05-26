@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/internal/tracing"
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/internal/tracing"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 const streamBuffer = 16 * 1024
@@ -90,12 +90,12 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 	}
 
 	tracer := otel.Tracer(tracing.TracerName)
-	ctx, span := tracer.Start(kctx.Request().Context(), "kono.upstream",
+	ctx, span := tracer.Start(kctx.Request().Context(), "aastro.upstream",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String("kono.upstream.name", u.name()),
-			attribute.String("kono.upstream.mode", "passthrough"),
-			attribute.String("kono.flow.path", f.path),
+			attribute.String("aastro.upstream.name", u.name()),
+			attribute.String("aastro.upstream.mode", "passthrough"),
+			attribute.String("aastro.flow.path", f.path),
 		),
 	)
 	defer span.End()

@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 var _ = Describe("Passthrough", func() {

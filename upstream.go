@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"bytes"
@@ -24,8 +24,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/internal/circuitbreaker"
-	"github.com/starwalkn/kono/internal/metric"
+	"github.com/starwalkn/aastro/internal/circuitbreaker"
+	"github.com/starwalkn/aastro/internal/metric"
 )
 
 type upstream interface {
@@ -232,7 +232,7 @@ func (u *httpUpstream) doCall(ctx context.Context, original *http.Request, origi
 		attribute.String("http.method", req.Method),
 		attribute.String("http.url", req.URL.String()),
 		attribute.String("server.address", req.URL.Host),
-		attribute.String("kono.upstream.host", u.cfg.hosts[selectedHost]),
+		attribute.String("aastro.upstream.host", u.cfg.hosts[selectedHost]),
 	)
 
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
@@ -623,7 +623,7 @@ func (u *httpUpstream) proxy(ctx context.Context, w http.ResponseWriter, origina
 		attribute.String("http.method", req.Method),
 		attribute.String("http.url", req.URL.String()),
 		attribute.String("server.address", req.URL.Host),
-		attribute.String("kono.upstream.host", host),
+		attribute.String("aastro.upstream.host", host),
 	)
 
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
@@ -657,7 +657,7 @@ func (u *httpUpstream) proxy(ctx context.Context, w http.ResponseWriter, origina
 
 	if err = streamCopy(w, resp.Body); err != nil {
 		if errors.Is(err, context.Canceled) {
-			span.SetAttributes(attribute.String("kono.passthrough.end_reason", "client_disconnect"))
+			span.SetAttributes(attribute.String("aastro.passthrough.end_reason", "client_disconnect"))
 			return nil
 		}
 

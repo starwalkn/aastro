@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"context"
@@ -17,12 +17,12 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/starwalkn/kono/internal/circuitbreaker"
-	"github.com/starwalkn/kono/internal/metric"
-	"github.com/starwalkn/kono/internal/otelcommon"
-	"github.com/starwalkn/kono/internal/ratelimit"
-	"github.com/starwalkn/kono/internal/tlsutil"
-	"github.com/starwalkn/kono/internal/tracing"
+	"github.com/starwalkn/aastro/internal/circuitbreaker"
+	"github.com/starwalkn/aastro/internal/metric"
+	"github.com/starwalkn/aastro/internal/otelcommon"
+	"github.com/starwalkn/aastro/internal/ratelimit"
+	"github.com/starwalkn/aastro/internal/tlsutil"
+	"github.com/starwalkn/aastro/internal/tracing"
 )
 
 type RoutingConfigSet struct {

@@ -1,4 +1,4 @@
-# Kono - example configuration showcasing every available option.
+# Aastro - example configuration showcasing every available option.
 #
 # This file is meant as a reference, not a copy-paste production config.
 # Most blocks are optional; uncomment and adjust what you actually need.
@@ -14,7 +14,7 @@ gateway:
   # Appears as service.name in OpenTelemetry resource attributes.
 
   service:
-    name: kono
+    name: aastro
 
   # ── Data port ────────────────────────────────────────────────────────────
   # Serves API traffic. Optionally protected by TLS or mTLS.
@@ -28,11 +28,11 @@ gateway:
     # Remove the tls block entirely for plain HTTP.
     tls:
       enabled: true
-      cert_file: /etc/kono/server.crt
-      key_file: /etc/kono/server.key
+      cert_file: /etc/aastro/server.crt
+      key_file: /etc/aastro/server.key
       min_version: "1.2"     # 1.2 or 1.3 - older versions are not selectable
       client_auth: require   # none | optional | require
-      client_ca_file: /etc/kono/client-ca.crt   # required unless client_auth=none
+      client_ca_file: /etc/aastro/client-ca.crt   # required unless client_auth=none
 
   # ── Admin port ───────────────────────────────────────────────────────────
   # Health probes, metrics, pprof. Bound to localhost by default.
@@ -73,7 +73,7 @@ gateway:
 
   routing:
     # CIDR ranges whose X-Forwarded-* headers are appended to rather than overwritten.
-    # Leave empty if Kono is your outermost edge.
+    # Leave empty if Aastro is your outermost edge.
     trusted_proxies:
       - 127.0.0.1/32
       - 10.0.0.0/8
@@ -127,7 +127,7 @@ gateway:
             source: builtin
           - name: tenant_resolver
             source: file
-            path: /etc/kono/plugins/
+            path: /etc/aastro/plugins/
             config:
               header: X-Tenant-Id
 
@@ -153,9 +153,9 @@ gateway:
             # Omit the tls block entirely for plain HTTPS - Go uses system roots.
             tls:
               enabled: true
-              cert_file: /etc/kono/clients/users.crt
-              key_file: /etc/kono/clients/users.key
-              ca_file: /etc/kono/internal-ca.crt
+              cert_file: /etc/aastro/clients/users.crt
+              key_file: /etc/aastro/clients/users.key
+              ca_file: /etc/aastro/internal-ca.crt
               server_name: users.internal   # SNI / hostname verification
               min_version: "1.2"
 
@@ -257,7 +257,7 @@ gateway:
         plugins:
           - name: tenant_resolver
             source: file
-            path: /etc/kono/plugins/
+            path: /etc/aastro/plugins/
             config:
               header: X-Tenant-Id
 

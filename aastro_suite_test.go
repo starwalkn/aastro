@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"fmt"
@@ -8,14 +8,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/starwalkn/kono/internal/metric"
+	"github.com/starwalkn/aastro/internal/metric"
 )
 
 var testMetrics *metric.Metrics
 
-func TestKono(t *testing.T) {
+func TestAastro(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Kono Suite")
+	RunSpecs(t, "Aastro Suite")
 }
 
 var _ = BeforeSuite(func() {

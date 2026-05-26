@@ -1,6 +1,6 @@
-# Contributing to Kono
+# Contributing to Aastro
 
-Thank you for your interest in Kono - a Go-based API Gateway with support for dynamic `.so` plugins that can freely modify the original `*http.Request` and the aggregated `*http.Response`.
+Thank you for your interest in Aastro - a Go-based API Gateway with support for dynamic `.so` plugins that can freely modify the original `*http.Request` and the aggregated `*http.Response`.
 
 We welcome all kinds of contributions: bug fixes, performance improvements, documentation updates, tests, architectural improvements, and new features.
 
@@ -19,19 +19,19 @@ We welcome all kinds of contributions: bug fixes, performance improvements, docu
 ## 🚀 Quick Start (Local Development)
 
 ```bash
-git clone https://github.com/starwalkn/kono.git
-cd kono
+git clone https://github.com/starwalkn/aastro.git
+cd aastro
 
 make all GOOS=<YOUR_OS> GOARCH=<YOUR_ARCH>
 
-./bin/kono serve
+./bin/aastro serve
 ```
 
 CLI commands:
 
 ```bash
-kono serve
-kono validate
+aastro serve
+aastro validate
 ```
 
 ---
@@ -39,8 +39,8 @@ kono validate
 ## 🐳 Running with Docker (Recommended)
 
 ```bash
-docker build -f build/Dockerfile -t kono:local .
-docker run -p 8705:8705 -v $(pwd)/<your_config>.yaml:/app/kono.yaml -e KONO_CONFIG=/app/kono.yaml kono:local
+docker build -f build/Dockerfile -t aastro:local .
+docker run -p 8705:8705 -v $(pwd)/<your_config>.yaml:/app/aastro.yaml -e KONO_CONFIG=/app/aastro.yaml aastro:local
 ```
 
 If using docker-compose:
@@ -53,7 +53,7 @@ docker compose up --build
 
 ## 🔌 Plugin Development
 
-Kono supports Go plugins compiled as `.so` files:
+Aastro supports Go plugins compiled as `.so` files:
 
 ```bash
 CGO_ENABLED=1 go build -buildmode=plugin -o myplugin.so ./plugins/myplugin
@@ -157,7 +157,7 @@ When opening an Issue, please include:
 
 - Go version
 - Operating system
-- How you are running Kono (Docker or local)
+- How you are running Aastro (Docker or local)
 - Gateway configuration
 - Example request (if relevant)
 - Expected behavior
@@ -210,4 +210,4 @@ You can help by:
 
 ---
 
-Thank you for contributing to Kono 🚀
+Thank you for contributing to Aastro 🚀

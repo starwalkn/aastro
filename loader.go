@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 const (
@@ -16,8 +16,8 @@ const (
 )
 
 const (
-	builtinPluginsPath     = "/usr/local/lib/kono/plugins/"
-	builtinMiddlewaresPath = "/usr/local/lib/kono/middlewares/"
+	builtinPluginsPath     = "/usr/local/lib/aastro/plugins/"
+	builtinMiddlewaresPath = "/usr/local/lib/aastro/middlewares/"
 )
 
 const extSo = ".so"

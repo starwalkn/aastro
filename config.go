@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"errors"
@@ -34,7 +34,7 @@ type GatewayConfig struct {
 }
 
 type ServiceConfig struct {
-	Name string `yaml:"name" default:"kono"`
+	Name string `yaml:"name" default:"aastro"`
 }
 
 type ServerConfig struct {

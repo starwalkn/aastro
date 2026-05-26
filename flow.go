@@ -1,9 +1,9 @@
-package kono
+package aastro
 
 import (
 	"golang.org/x/sync/semaphore"
 
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 type flow struct {

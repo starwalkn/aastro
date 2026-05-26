@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 type Plugin struct{}

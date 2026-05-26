@@ -18,7 +18,7 @@ type Provider interface {
 
 // DefaultServiceName is used when the configured service name is empty.
 // Should match cfg.Gateway.Service.Name's default tag in config.go.
-const DefaultServiceName = "kono"
+const DefaultServiceName = "aastro"
 
 func NewResource(ctx context.Context, serviceName, serviceVersion string) (*resource.Resource, error) {
 	if serviceName == "" {

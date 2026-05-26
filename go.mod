@@ -1,4 +1,4 @@
-module github.com/starwalkn/kono
+module github.com/starwalkn/aastro
 
 go 1.26.3
 

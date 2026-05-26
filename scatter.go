@@ -1,4 +1,4 @@
-package kono
+package aastro
 
 import (
 	"fmt"
@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono/internal/metric"
-	"github.com/starwalkn/kono/internal/tracing"
+	"github.com/starwalkn/aastro/internal/metric"
+	"github.com/starwalkn/aastro/internal/tracing"
 )
 
 const maxBodySize = 5 << 20 // 5 MB
@@ -36,10 +36,10 @@ func (d *defaultScatter) scatter(f *flow, original *http.Request) []upstreamResp
 	log := d.log.With(zap.String("request_id", requestIDFromContext(original.Context())))
 
 	tracer := otel.Tracer(tracing.TracerName)
-	ctx, span := tracer.Start(original.Context(), "kono.scatter",
+	ctx, span := tracer.Start(original.Context(), "aastro.scatter",
 		trace.WithAttributes(
-			attribute.Int("kono.upstream.count", len(f.upstreams)),
-			attribute.String("kono.aggregation.strategy", f.aggregation.strategy.String()),
+			attribute.Int("aastro.upstream.count", len(f.upstreams)),
+			attribute.String("aastro.aggregation.strategy", f.aggregation.strategy.String()),
 		),
 	)
 	defer span.End()
@@ -102,11 +102,11 @@ func (d *defaultScatter) callUpstream(
 	start := time.Now()
 
 	tracer := otel.Tracer(tracing.TracerName)
-	ctx, span := tracer.Start(original.Context(), "kono.upstream",
+	ctx, span := tracer.Start(original.Context(), "aastro.upstream",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String("kono.upstream.name", u.name()),
-			attribute.String("kono.flow.path", f.path),
+			attribute.String("aastro.upstream.name", u.name()),
+			attribute.String("aastro.flow.path", f.path),
 		),
 	)
 	defer span.End()
@@ -127,7 +127,7 @@ func (d *defaultScatter) callUpstream(
 	defer f.sem.Release(1)
 
 	waited := time.Since(acquireStart)
-	span.SetAttributes(attribute.Int64("kono.upstream.wait_us", waited.Microseconds()))
+	span.SetAttributes(attribute.Int64("aastro.upstream.wait_us", waited.Microseconds()))
 	span.AddEvent("semaphore.acquired")
 
 	d.metrics.IncUpstreamRequestsTotal(f.path, u.name())
@@ -137,7 +137,7 @@ func (d *defaultScatter) callUpstream(
 		d.metrics.IncUpstreamErrorsTotal(f.path, u.name(), string(resp.err.kind))
 
 		span.RecordError(resp.err.Unwrap())
-		span.SetAttributes(attribute.String("kono.upstream.error_kind", resp.err.Error()))
+		span.SetAttributes(attribute.String("aastro.upstream.error_kind", resp.err.Error()))
 		span.SetStatus(codes.Error, "upstream call failed")
 
 		log.Error("upstream call failed",

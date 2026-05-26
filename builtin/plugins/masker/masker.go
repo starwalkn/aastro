@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/starwalkn/kono/sdk"
+	"github.com/starwalkn/aastro/sdk"
 )
 
 const maskValue = "***"

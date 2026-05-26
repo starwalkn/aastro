@@ -13,9 +13,9 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/kono"
-	"github.com/starwalkn/kono/internal/logger"
-	"github.com/starwalkn/kono/internal/server"
+	"github.com/starwalkn/aastro"
+	"github.com/starwalkn/aastro/internal/logger"
+	"github.com/starwalkn/aastro/internal/server"
 )
 
 const (
@@ -48,7 +48,7 @@ func runServe() error {
 		cfgPath = fallbackConfigPath
 	}
 
-	cfg, err := kono.LoadConfig(cfgPath)
+	cfg, err := aastro.LoadConfig(cfgPath)
 	if err != nil {
 		return err
 	}
