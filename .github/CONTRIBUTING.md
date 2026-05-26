@@ -40,7 +40,7 @@ aastro validate
 
 ```bash
 docker build -f build/Dockerfile -t aastro:local .
-docker run -p 8705:8705 -v $(pwd)/<your_config>.yaml:/app/aastro.yaml -e KONO_CONFIG=/app/aastro.yaml aastro:local
+docker run -p 8705:8705 -v $(pwd)/<your_config>.yaml:/app/aastro.yaml -e AASTRO_CONFIG=/app/aastro.yaml aastro:local
 ```
 
 If using docker-compose:

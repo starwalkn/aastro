@@ -29,6 +29,6 @@ func init() {
 		&cfgPath,
 		"config",
 		"",
-		"Path to configuration file (env KONO_CONFIG)",
+		"Path to configuration file (env AASTRO_CONFIG)",
 	)
 }

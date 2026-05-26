@@ -32,7 +32,7 @@ func init() {
 
 func runValidate() error {
 	if cfgPath == "" {
-		cfgPath = os.Getenv("KONO_CONFIG")
+		cfgPath = os.Getenv("AASTRO_CONFIG")
 	}
 	if cfgPath == "" {
 		cfgPath = fallbackConfigPath

@@ -17,7 +17,7 @@ var vizCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if cfgPath == "" {
-			cfgPath = os.Getenv("KONO_CONFIG")
+			cfgPath = os.Getenv("AASTRO_CONFIG")
 		}
 		if cfgPath == "" {
 			cfgPath = fallbackConfigPath
@@ -137,7 +137,7 @@ func (v *viz) renderHeader(routing aastro.RoutingConfig) {
 
 	fmt.Println()
 	fmt.Println(
-		"  "+styleHeader.Render("KONO"),
+		"  "+styleHeader.Render("AASTRO"),
 		styleHeaderMeta.Render(count+"  ·  "+rl),
 	)
 }

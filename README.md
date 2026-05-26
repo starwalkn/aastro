@@ -48,7 +48,7 @@ Or with Docker:
 docker run \
   -p 7805:7805 \
   -v $(pwd)/aastro.yaml:/app/aastro.yaml \
-  -e KONO_CONFIG=/app/aastro.yaml \
+  -e AASTRO_CONFIG=/app/aastro.yaml \
   starwalkn/aastro:latest
 ```
 
