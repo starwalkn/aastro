@@ -174,9 +174,9 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 			return
 		}
 
-		kctx := newContext(req)
+		actx := newContext(req)
 
-		if !r.executePlugins(sdk.PluginTypeRequest, w, kctx, f, log) {
+		if !r.executePlugins(sdk.PluginTypeRequest, w, actx, f, log) {
 			return
 		}
 
@@ -208,13 +208,13 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 		httpResp := r.buildResponse(req.Context(), upstreamResponses, f, log)
 		defer func() { _ = httpResp.Body.Close() }()
 
-		kctx.SetResponse(httpResp)
+		actx.SetResponse(httpResp)
 
-		if !r.executePlugins(sdk.PluginTypeResponse, w, kctx, f, log) {
+		if !r.executePlugins(sdk.PluginTypeResponse, w, actx, f, log) {
 			return
 		}
 
-		finalResp := kctx.Response()
+		finalResp := actx.Response()
 		if finalResp != nil && finalResp != httpResp && finalResp.Body != nil {
 			defer func() { _ = finalResp.Body.Close() }()
 		}
@@ -240,7 +240,7 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 // executePlugins runs all plugins of the given type in order.
 // On the first plugin error it writes a 500 to w and returns false —
 // the caller must treat false as "response already sent, stop processing".
-func (r *Router) executePlugins(pluginType sdk.PluginType, w http.ResponseWriter, kctx sdk.Context, f *flow, log *zap.Logger) bool {
+func (r *Router) executePlugins(pluginType sdk.PluginType, w http.ResponseWriter, actx sdk.Context, f *flow, log *zap.Logger) bool {
 	tracer := otel.Tracer(tracing.TracerName)
 
 	for _, p := range f.plugins {
@@ -253,15 +253,15 @@ func (r *Router) executePlugins(pluginType sdk.PluginType, w http.ResponseWriter
 			zap.String("name", p.Info().Name),
 		)
 
-		ctx, span := tracer.Start(kctx.Request().Context(), "aastro.plugin",
+		ctx, span := tracer.Start(actx.Request().Context(), "aastro.plugin",
 			trace.WithAttributes(
 				attribute.String("aastro.plugin.name", p.Info().Name),
 				attribute.String("aastro.plugin.type", pluginType.String()),
 			),
 		)
 
-		kctx.SetRequest(kctx.Request().WithContext(ctx))
-		err := p.Execute(kctx)
+		actx.SetRequest(actx.Request().WithContext(ctx))
+		err := p.Execute(actx)
 		span.End()
 
 		if err != nil {

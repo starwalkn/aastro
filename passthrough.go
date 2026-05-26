@@ -83,14 +83,14 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 		log.Warn("cannot disable read deadline for passthrough", zap.Error(err))
 	}
 
-	kctx := newContext(req)
+	actx := newContext(req)
 
-	if !r.executePlugins(sdk.PluginTypeRequest, w, kctx, f, log) {
+	if !r.executePlugins(sdk.PluginTypeRequest, w, actx, f, log) {
 		return
 	}
 
 	tracer := otel.Tracer(tracing.TracerName)
-	ctx, span := tracer.Start(kctx.Request().Context(), "aastro.upstream",
+	ctx, span := tracer.Start(actx.Request().Context(), "aastro.upstream",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
 			attribute.String("aastro.upstream.name", u.name()),
@@ -102,7 +102,7 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 
 	tw := &trackingWriter{ResponseWriter: w}
 
-	err := proxy.proxy(ctx, tw, kctx.Request())
+	err := proxy.proxy(ctx, tw, actx.Request())
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "passthrough upstream error")

@@ -7,25 +7,36 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.0] - 2026-05-26
+
+### Added
+
+- New command-line interface and ctl for stub plugins initialization.
+For more information about the CLI, see the [documentation](https://starwalkn.github.io/aastrodocs).
+
+### Changed
+
+- Project was renamed from Kono to Aastro
+
 ## [0.4.1] - 2026-05-24
 
 ### Changed
 
-Changed final image to chainguard/wolfi-base
+- Changed final image to chainguard/wolfi-base
 
 ### Fixed
 
-Used UUID v7 instead of ULID for request id
+- Used UUID v7 instead of ULID for request id
 
 ## [0.4.0] - 2026-05-16
 
 ### ⚠️ Breaking Changes
 
-The configuration schema has been restructured to separate concerns by listener and
+- The configuration schema has been restructured to separate concerns by listener and
 responsibility. Existing 0.3.x configs will fail to load with a clear validation error
 pointing at the missing sections.
 
-**Admin endpoints moved to a top-level `admin` section.** Previously `server.admin_port`,
+- **Admin endpoints moved to a top-level `admin` section.** Previously `server.admin_port`,
 `server.admin_bind_addr`, and `server.pprof` lived inside `server`. They are now grouped
 under their own section, since admin is a separate listener with separate semantics
 (never TLS-terminated, bound to localhost by default, distinct timeouts).
@@ -50,7 +61,7 @@ gateway:
     enable_pprof: true
 ```
 
-**Observability moved to a top-level `observability` section.** `metrics` and `tracing`
+- **Observability moved to a top-level `observability` section.** `metrics` and `tracing`
 were previously nested under `server`. They are not server concerns - metrics is either
 scraped from the admin port (Prometheus exporter) or pushed to OTLP, and tracing is
 always push-only.
@@ -69,17 +80,17 @@ gateway:
     tracing: { ... }
 ```
 
-**pprof no longer has its own port.** Previously `pprof.port` opened a separate listener.
+- **pprof no longer has its own port.** Previously `pprof.port` opened a separate listener.
 pprof endpoints now live on the admin port under `/debug/pprof/`, controlled by
 `admin.enable_pprof`. One fewer port to manage and to expose through network policy.
 
-**Flow field `max_parallel_upstreams` renamed to `parallel_upstreams`.** Aligns docs
+- **Flow field `max_parallel_upstreams` renamed to `parallel_upstreams`.** Aligns docs
 with actual behaviour and the code field name. Same semantics, same default
 (`2 × NumCPU`).
 
 ### Added
 
-**mTLS support, end-to-end.** Both the data port (inbound mTLS) and individual upstreams
+- **mTLS support, end-to-end.** Both the data port (inbound mTLS) and individual upstreams
 (outbound mTLS) can now be configured with client certificate authentication, custom CA
 bundles, configurable minimum TLS version (1.2 or 1.3), and SNI override.
 
@@ -105,24 +116,24 @@ gateway:
               server_name: user-service.internal
 ```
 
-**Liveness and readiness probes.** New `/__ready` endpoint on the admin port returns
+- **Liveness and readiness probes.** New `/__ready` endpoint on the admin port returns
 `200` while the gateway is accepting traffic and `503` once graceful shutdown begins.
 This lets Kubernetes (or any orchestrator with readiness probes) remove the pod from
 service endpoints *before* the data port stops accepting connections, enabling true
 zero-downtime deploys. `/__health` continues to return `200` while the process is alive
 and never checks dependencies.
 
-**Configurable admin timeout.** New `admin.timeout` field (default `5m`) controls
+- **Configurable admin timeout.** New `admin.timeout` field (default `5m`) controls
 read/write timeout on the admin port. Replaces a previously hard-coded constant. The
 generous default exists to accommodate long pprof captures (`/debug/pprof/profile`,
 `/debug/pprof/trace`); production data-port timeouts remain short.
 
-**Configurable header timeouts.** New `server.header_timeout` and `admin.header_timeout`
+- **Configurable header timeouts.** New `server.header_timeout` and `admin.header_timeout`
 fields (default `5s` each) set `http.Server.ReadHeaderTimeout` on the respective listeners.
 Defends against Slowloris-style attacks where a client trickles request headers slowly
 to exhaust the server.
 
-**Structured TLS handshake logging.** `http.Server.ErrorLog` is now wired through the
+- **Structured TLS handshake logging.** `http.Server.ErrorLog` is now wired through the
 gateway's zap logger on both data and admin listeners. TLS handshake failures (failed
 client certificate verification, version mismatch, unsupported cipher) now appear in
 the same structured log stream as the rest of the application instead of escaping to
@@ -130,21 +141,21 @@ stderr via the standard logger.
 
 ### Changed
 
-**Admin listener binds to `127.0.0.1` by default.** Previously bound to all interfaces.
+- **Admin listener binds to `127.0.0.1` by default.** Previously bound to all interfaces.
 The admin port carries diagnostic endpoints (`/__health`, `/__ready`, `/metrics`,
 `/debug/pprof/`) that should not be exposed externally. Set `admin.bind_addr: 0.0.0.0`
 explicitly if Prometheus scrapes from outside the pod network.
 
-**`/metrics` endpoint moved to the admin port.** When `metrics.exporter: prometheus`,
+- **`/metrics` endpoint moved to the admin port.** When `metrics.exporter: prometheus`,
 the endpoint is now served on `admin.port` rather than the data port. This means
 Prometheus can scrape Aastro over plain HTTP without needing a client certificate, even
 when the data port enforces mTLS.
 
-**Health probe response format changed.** `/__health` now returns
+- **Health probe response format changed.** `/__health` now returns
 `{"status": "ok"}` with `Content-Type: application/json` instead of plain text `OK`.
 Consistent with the rest of the gateway's response format.
 
-**TLS 1.0 and 1.1 are not selectable.** `min_version` accepts only `"1.2"` or `"1.3"`.
+- **TLS 1.0 and 1.1 are not selectable.** `min_version` accepts only `"1.2"` or `"1.3"`.
 RFC 8996 deprecated 1.0 and 1.1 in 2021, and they are disabled in modern clients
 regardless of server configuration.
 
@@ -166,11 +177,11 @@ loading will refuse to start with the old values.
 
 ### Fixed
 
-**WaitGroup pooling in scatter.** Removed `sync.Pool` reuse of `sync.WaitGroup` values.
+- **WaitGroup pooling in scatter.** Removed `sync.Pool` reuse of `sync.WaitGroup` values.
 WaitGroup does not reset to a clean state after use, and pooling it risks counter
 corruption on edge paths. Allocation cost of a fresh WaitGroup per request is negligible.
 
-**Race on shutdown error reporting.** Fixed a data race in the serve command where the
+- **Race on shutdown error reporting.** Fixed a data race in the serve command where the
 listener error and the main goroutine's shutdown path both wrote to the same `err`
 variable. Local variable inside the goroutine now passes the error exclusively through
 the channel.
