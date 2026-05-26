@@ -39,7 +39,7 @@ git clone https://github.com/starwalkn/aastro.git
 cd aastro
 
 make all GOOS=<YOUR_OS> GOARCH=<YOUR_ARCH>
-./bin/aastro serve --config /path/to/config.yaml
+./bin/aastro -c path/to/config.yaml
 ```
 
 Or with Docker:
@@ -47,8 +47,8 @@ Or with Docker:
 ```bash
 docker run \
   -p 7805:7805 \
-  -v $(pwd)/aastro.yaml:/app/aastro.yaml \
-  -e AASTRO_CONFIG=/app/aastro.yaml \
+  -v $(pwd)/config.yaml:/etc/aastro/config.yaml \
+  -e AASTRO_CONFIG=/etc/aastro/config.yaml \
   starwalkn/aastro:latest
 ```
 

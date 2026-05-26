@@ -3,30 +3,44 @@ GOARCH ?= amd64
 PLUGIN_OUT=build/plugins
 MIDDLEWARE_OUT=build/middlewares
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -s -w -X main.version=$(VERSION)
+ifndef VERSION
+	VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+endif
 
-.PHONY: all build plugins clean lint test
+COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
+
+.PHONY: all build aastro aastroctl plugins clean lint test
 
 all: clean build plugins
 
-build:
-	mkdir -p .bin
+build: aastro aastroctl
+
+aastro:
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -trimpath -o .bin/aastro ./cmd/aastro
 
-plugins:
-	mkdir -p $(PLUGIN_OUT)
-	mkdir -p $(MIDDLEWARE_OUT)
+aastroctl:
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -trimpath -o .bin/aastroctl ./cmd/aastroctl
 
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(MIDDLEWARE_OUT)/auth.so ./builtin/middlewares/auth
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(MIDDLEWARE_OUT)/compressor.so ./builtin/middlewares/compressor
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(MIDDLEWARE_OUT)/cors.so ./builtin/middlewares/cors
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(MIDDLEWARE_OUT)/logger.so ./builtin/middlewares/logger
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(MIDDLEWARE_OUT)/recoverer.so ./builtin/middlewares/recoverer
+MIDDLEWARES := $(notdir $(wildcard builtin/middlewares/*))
+PLUGINS     := $(notdir $(wildcard builtin/plugins/*))
 
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(PLUGIN_OUT)/camelify.so ./builtin/plugins/camelify
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(PLUGIN_OUT)/masker.so ./builtin/plugins/masker
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o $(PLUGIN_OUT)/snakeify.so ./builtin/plugins/snakeify
+PLUGIN_LDFLAGS := -s -w
+PLUGIN_BUILDFLAGS := -trimpath -ldflags="$(PLUGIN_LDFLAGS)" -buildmode=plugin
+
+plugins: $(addprefix $(MIDDLEWARE_OUT)/,$(addsuffix .so,$(MIDDLEWARES))) \
+         $(addprefix $(PLUGIN_OUT)/,$(addsuffix .so,$(PLUGINS)))
+
+$(MIDDLEWARE_OUT)/%.so: builtin/middlewares/% | $(MIDDLEWARE_OUT)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build $(PLUGIN_BUILDFLAGS) -o $@ ./$<
+
+$(PLUGIN_OUT)/%.so: builtin/plugins/% | $(PLUGIN_OUT)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build $(PLUGIN_BUILDFLAGS) -o $@ ./$<
+
+$(MIDDLEWARE_OUT) $(PLUGIN_OUT):
+	mkdir -p $@
 
 clean:
 	rm -rf build/middlewares build/plugins .bin

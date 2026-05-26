@@ -3,6 +3,7 @@ package aastro
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"regexp"
@@ -23,6 +24,21 @@ type Config struct {
 	Schema  string        `yaml:"schema" validate:"required,oneof=v1"`
 	Debug   bool          `yaml:"debug"`
 	Gateway GatewayConfig `yaml:"gateway" validate:"required"`
+}
+
+func (c *Config) Marshal() ([]byte, error) {
+	return yaml.Marshal(c)
+}
+
+func (c *Config) WriteTo(w io.Writer) (int64, error) {
+	data, err := c.Marshal()
+	if err != nil {
+		return 0, fmt.Errorf("marshal config: %w", err)
+	}
+
+	n, err := w.Write(data)
+
+	return int64(n), err
 }
 
 type GatewayConfig struct {
@@ -295,6 +311,10 @@ func validatePathParams(cfg Config) error {
 			if err := validateUpstreamParams(u, flowParams, f.Path); err != nil {
 				return err
 			}
+		}
+
+		if f.Passthrough && len(f.Upstreams) > 1 {
+			return errors.New("passthrough flow must have only one upstream")
 		}
 	}
 

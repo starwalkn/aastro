@@ -23,34 +23,28 @@ type pluginInitFlags struct {
 	output      string
 }
 
-var pluginCmd = &cobra.Command{
-	Use:   "plugin",
-	Short: "Manage Aastro plugins",
-}
-
 func init() {
-	rootCmd.AddCommand(pluginCmd)
-
 	flags := &pluginInitFlags{}
 
-	initCmd := &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Generate a new plugin or middleware skeleton",
+		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runPluginInit(*flags)
 		},
 	}
 
-	initCmd.Flags().StringVar(&flags.pluginType, "type", "", "Plugin type: request, response, middleware")
-	initCmd.Flags().StringVar(&flags.name, "name", "", "Plugin name (required)")
-	initCmd.Flags().StringVar(&flags.description, "description", "", "Plugin description")
-	initCmd.Flags().StringVar(&flags.author, "author", "", "Plugin author")
-	initCmd.Flags().StringVar(&flags.output, "out", "", "Output file path (default: <name>.go in current directory)")
+	cmd.Flags().StringVar(&flags.pluginType, "type", "", "plugin type: request, response, middleware")
+	cmd.Flags().StringVar(&flags.name, "name", "", "plugin name (required)")
+	cmd.Flags().StringVar(&flags.description, "description", "", "plugin description")
+	cmd.Flags().StringVar(&flags.author, "author", "", "plugin author")
+	cmd.Flags().StringVar(&flags.output, "out", "", "output file path (default: <name>.go in current directory)")
 
-	_ = initCmd.MarkFlagRequired("type")
-	_ = initCmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("type")
+	_ = cmd.MarkFlagRequired("name")
 
-	pluginCmd.AddCommand(initCmd)
+	pluginCmd.AddCommand(cmd)
 }
 
 func runPluginInit(f pluginInitFlags) error {
@@ -101,7 +95,7 @@ func runPluginInit(f pluginInitFlags) error {
 		return fmt.Errorf("write output: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(os.Stdout, "created %s\n", out)
+	fmt.Fprintf(os.Stderr, "created %s\n", out)
 
 	return nil
 }
