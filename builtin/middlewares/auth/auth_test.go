@@ -133,7 +133,6 @@ var _ = Describe("Auth", func() {
 				Expect(gotClaims).ToNot(BeNil())
 				Expect(gotClaims.GetIssuer()).To(Equal("test-issuer"))
 				Expect(gotClaims.GetAudience()).To(ContainElement("test-aud"))
-
 			})
 		})
 		Context("malformed authorization header", func() {
