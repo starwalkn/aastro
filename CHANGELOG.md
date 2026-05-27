@@ -7,6 +7,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.1] - YYYY-MM-DD
+
+### Changed
+
+- goccy/go-json instead of stdlib encoding/json
+
 ## [0.5.0] - 2026-05-26
 
 ### Added

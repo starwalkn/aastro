@@ -1,8 +1,9 @@
 package aastro
 
 import (
-	"encoding/json"
 	"net/http"
+
+	"github.com/goccy/go-json"
 )
 
 // ClientResponse is an output structure that wraps the final response from the gateway to the client.

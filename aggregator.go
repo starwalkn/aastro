@@ -1,9 +1,9 @@
 package aastro
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"github.com/goccy/go-json"
 	"go.uber.org/zap"
 )
 

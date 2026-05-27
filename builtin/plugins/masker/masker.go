@@ -2,10 +2,11 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/goccy/go-json"
 
 	"github.com/starwalkn/aastro/sdk"
 )

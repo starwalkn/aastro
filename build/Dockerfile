@@ -23,6 +23,7 @@ FROM chainguard/wolfi-base@sha256:0cff4df29a6597173dc8b813787318150141eb96ac783d
 
 ARG VERSION
 ARG COMMIT
+
 LABEL org.opencontainers.image.title="aastro" \
       org.opencontainers.image.description="Aastro API Gateway" \
       org.opencontainers.image.version="${VERSION}" \
