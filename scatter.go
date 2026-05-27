@@ -1,6 +1,8 @@
 package aastro
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -113,6 +115,17 @@ func (d *defaultScatter) callUpstream(
 
 	acquireStart := time.Now()
 	if err := f.sem.Acquire(ctx, 1); err != nil {
+		if errors.Is(err, context.Canceled) {
+			log.Info("request canceled while waiting for semaphore", zap.Error(err))
+
+			return upstreamResponse{
+				err: &upstreamError{
+					kind: upstreamCanceled,
+					err:  err,
+				},
+			}
+		}
+
 		log.Error("cannot acquire semaphore", zap.Error(err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "semaphore acquire failed")
