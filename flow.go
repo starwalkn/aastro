@@ -1,17 +1,14 @@
 package aastro
 
 import (
-	"golang.org/x/sync/semaphore"
-
 	"github.com/starwalkn/aastro/sdk"
 )
 
 type flow struct {
-	path              string
-	method            string
-	aggregation       aggregation
-	parallelUpstreams int64
-	upstreams         []upstream
+	path        string
+	method      string
+	aggregation aggregation
+	upstreams   []upstream
 
 	plugins     []sdk.Plugin
 	middlewares []sdk.Middleware
@@ -20,8 +17,6 @@ type flow struct {
 	// When true: only one upstream is allowed, aggregation is skipped,
 	// and the response body is piped directly to the client (SSE-safe).
 	passthrough bool
-
-	sem *semaphore.Weighted
 }
 
 type aggregation struct {

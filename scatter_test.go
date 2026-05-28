@@ -17,8 +17,6 @@ import (
 	"github.com/starwalkn/aastro/internal/circuitbreaker"
 )
 
-const defaultParallelUpstreams = 10
-
 var _ = Describe("Scatter", func() {
 	Describe("dispatching to multiple upstreams", func() {
 		It("returns responses from all of them", func() {
@@ -37,7 +35,7 @@ var _ = Describe("Scatter", func() {
 			f := newTestFlow([]upstream{
 				newTestUpstream(serverA.URL),
 				newTestUpstream(serverB.URL),
-			}, defaultParallelUpstreams)
+			})
 
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -59,7 +57,7 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withMethod(http.MethodPost)),
-			}, defaultParallelUpstreams)
+			})
 
 			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("hello"))
 			results := newTestScatter().scatter(f, req)
@@ -72,7 +70,7 @@ var _ = Describe("Scatter", func() {
 		It("returns nil for an oversized request body", func() {
 			f := newTestFlow([]upstream{
 				newTestUpstream("http://localhost"),
-			}, defaultParallelUpstreams)
+			})
 
 			oversizedBody := bytes.Repeat([]byte("x"), maxBodySize+1)
 			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(oversizedBody))
@@ -93,7 +91,7 @@ var _ = Describe("Scatter", func() {
 					withForwardQueries("foo"),
 					withForwardHeaders("X-Test"),
 				),
-			}, defaultParallelUpstreams)
+			})
 
 			req := httptest.NewRequest(http.MethodGet, "/?foo=bar", nil)
 			req.Header.Set("X-Test", "baz")
@@ -111,7 +109,7 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withForwardParams("user_id")),
-			}, defaultParallelUpstreams)
+			})
 
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("user_id", "42")
@@ -135,7 +133,7 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withPath("/orders/{order_id}")),
-			}, defaultParallelUpstreams)
+			})
 
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("order_id", "99")
@@ -163,7 +161,7 @@ var _ = Describe("Scatter", func() {
 			f := newTestFlow([]upstream{
 				newTestUpstream(serverWithBody.URL, withPolicy(upstreamPolicy{requireBody: true})),
 				newTestUpstream(serverNoBody.URL, withPolicy(upstreamPolicy{requireBody: true})),
-			}, defaultParallelUpstreams)
+			})
 
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -181,7 +179,7 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withPolicy(upstreamPolicy{allowedStatuses: []int{http.StatusOK}})),
-			}, defaultParallelUpstreams)
+			})
 
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -197,7 +195,7 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withPolicy(upstreamPolicy{maxResponseBodySize: 10})),
-			}, defaultParallelUpstreams)
+			})
 
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -214,7 +212,7 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withTimeout(100*time.Millisecond)),
-			}, defaultParallelUpstreams)
+			})
 
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -245,7 +243,7 @@ var _ = Describe("Scatter", func() {
 						backoffDelay:    10 * time.Millisecond,
 					},
 				})),
-			}, defaultParallelUpstreams)
+			})
 
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -272,7 +270,7 @@ var _ = Describe("Scatter", func() {
 						backoffDelay:    10 * time.Millisecond,
 					},
 				})),
-			}, defaultParallelUpstreams)
+			})
 
 			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -297,7 +295,7 @@ var _ = Describe("Scatter", func() {
 			cb := circuitbreaker.New(maxFailures, 100*time.Millisecond)
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withCircuitBreaker(cb)),
-			}, defaultParallelUpstreams)
+			})
 
 			d := newTestScatter()
 			results := make([]upstreamResponse, 5)
@@ -333,7 +331,7 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withCircuitBreaker(cb)),
-			}, defaultParallelUpstreams)
+			})
 
 			d := newTestScatter()
 
@@ -371,7 +369,7 @@ var _ = Describe("Scatter", func() {
 					withHosts(serverA.URL, serverB.URL),
 					withLBMode(lbModeRoundRobin, 2),
 				),
-			}, 1)
+			})
 
 			d := newTestScatter()
 			for range 4 {
@@ -401,7 +399,7 @@ var _ = Describe("Scatter", func() {
 					withHosts(serverA.URL, serverB.URL),
 					withLBMode(lbModeLeastConns, 2),
 				),
-			}, defaultParallelUpstreams)
+			})
 
 			d := newTestScatter()
 			var wg sync.WaitGroup
@@ -416,42 +414,6 @@ var _ = Describe("Scatter", func() {
 			wg.Wait()
 
 			Expect(callsB.Load()).To(BeNumerically(">", callsA.Load()))
-		})
-	})
-
-	Describe("parallelism limit", func() {
-		It("does not exceed configured semaphore weight", func() {
-			var concurrent atomic.Int32
-			var maxConcurrent atomic.Int32
-
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				cur := concurrent.Add(1)
-				defer concurrent.Add(-1)
-				for {
-					old := maxConcurrent.Load()
-					if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
-						break
-					}
-				}
-				time.Sleep(30 * time.Millisecond)
-				w.WriteHeader(http.StatusOK)
-			}))
-			defer server.Close()
-
-			const parallelUpstreams = 2
-			const upstreamCount = 6
-
-			upstreams := make([]upstream, upstreamCount)
-			for i := range upstreamCount {
-				upstreams[i] = newTestUpstream(server.URL)
-			}
-
-			newTestScatter().scatter(
-				newTestFlow(upstreams, parallelUpstreams),
-				httptest.NewRequest(http.MethodGet, "/", nil),
-			)
-
-			Expect(maxConcurrent.Load()).To(BeNumerically("<=", parallelUpstreams))
 		})
 	})
 })

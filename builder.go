@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/starwalkn/aastro/internal/circuitbreaker"
 	"github.com/starwalkn/aastro/internal/metric"
@@ -248,16 +247,13 @@ func compileFlow(cfg FlowConfig, trustedProxies []*net.IPNet, metrics *metric.Me
 	}
 
 	return flow{
-		path:              cfg.Path,
-		method:            cfg.Method,
-		aggregation:       aggregationParams,
-		parallelUpstreams: cfg.ParallelUpstreams,
-		upstreams:         upstreams,
-		plugins:           plugins,
-		middlewares:       middlewares,
-		passthrough:       cfg.Passthrough,
-
-		sem: semaphore.NewWeighted(cfg.ParallelUpstreams),
+		path:        cfg.Path,
+		method:      cfg.Method,
+		aggregation: aggregationParams,
+		upstreams:   upstreams,
+		plugins:     plugins,
+		middlewares: middlewares,
+		passthrough: cfg.Passthrough,
 	}, nil
 }
 

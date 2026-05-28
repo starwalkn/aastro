@@ -19,7 +19,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/starwalkn/aastro/internal/circuitbreaker"
 	"github.com/starwalkn/aastro/sdk"
@@ -297,11 +296,8 @@ func (f *tlsFixture) issueCert(p certParams) tls.Certificate {
 
 // ── Flow / scatter builders ───────────────────────────────────────────────────
 
-func newTestFlow(upstreams []upstream, parallelUpstreams int64) *flow {
-	return &flow{
-		upstreams: upstreams,
-		sem:       semaphore.NewWeighted(parallelUpstreams),
-	}
+func newTestFlow(upstreams []upstream) *flow {
+	return &flow{upstreams: upstreams}
 }
 
 func newTestScatter() *defaultScatter {

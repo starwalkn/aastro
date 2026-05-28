@@ -7,7 +7,6 @@ import (
 	"os"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -15,10 +14,6 @@ import (
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
 )
-
-// parallelismMultiplier scales ParallelUpstreams relative to runtime.NumCPU()
-// when no explicit value is configured.
-const parallelismMultiplier = 2
 
 type Config struct {
 	Schema  string        `yaml:"schema" validate:"required,oneof=v1"`
@@ -116,9 +111,6 @@ type FlowConfig struct {
 	Path        string `yaml:"path"   validate:"required,startswith=/"`
 	Method      string `yaml:"method" validate:"required,oneof=GET POST PUT PATCH DELETE HEAD OPTIONS"`
 	Passthrough bool   `yaml:"passthrough"`
-
-	// ParallelUpstreams defaults to 2×NumCPU when unset or zero.
-	ParallelUpstreams int64 `yaml:"parallel_upstreams"`
 
 	Aggregation *AggregationConfig `yaml:"aggregation"  validate:"required_if=Passthrough false"`
 	Upstreams   []UpstreamConfig   `yaml:"upstreams"    validate:"required,min=1,dive,required"`
@@ -256,8 +248,6 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("cannot apply configuration defaults: %w", err)
 	}
 
-	applyDynamicDefaults(&cfg)
-
 	v := newValidator()
 
 	if err = v.Struct(&cfg); err != nil {
@@ -273,17 +263,6 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// applyDynamicDefaults sets defaults that cannot be expressed as static tag values
-// because they depend on runtime state (e.g. NumCPU).
-func applyDynamicDefaults(cfg *Config) {
-	for i := range cfg.Gateway.Routing.Flows {
-		f := &cfg.Gateway.Routing.Flows[i]
-		if f.ParallelUpstreams < 1 {
-			f.ParallelUpstreams = int64(parallelismMultiplier * runtime.NumCPU())
-		}
-	}
 }
 
 func newValidator() *validator.Validate {

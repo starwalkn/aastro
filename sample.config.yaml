@@ -97,7 +97,6 @@ gateway:
 
       - path: /api/v1/customers/{customer_id}
         method: GET
-        parallel_upstreams: 10   # max concurrent upstream calls per request
 
         aggregation:
           strategy: merge        # merge | array | namespace
