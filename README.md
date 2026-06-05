@@ -58,7 +58,7 @@ docker run \
 
 Full documentation, configuration reference, and plugin guide are available at:
 
-**[starwalkn.github.io/aastrodocs](https://starwalkn.github.io/aastrodocs/)**
+**[starwalkn.github.io/aastrodocs](https://starwalkn.github.io/aastro-docs/)**
 
 ---
 
