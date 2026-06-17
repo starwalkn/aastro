@@ -27,8 +27,7 @@ type defaultScatter struct {
 	metrics *metric.Metrics
 }
 
-// scatter reads the original request body once, then fans out to all upstreams
-// concurrently, respecting the flow's parallelism semaphore.
+// scatter reads the original request body once, then fans out to all upstreams concurrently.
 // Returns nil when the body is unreadable or exceeds maxBodySize —
 // the caller treats nil as a signal to respond with 413.
 func (d *defaultScatter) scatter(f *flow, original *http.Request) []upstreamResponse {
