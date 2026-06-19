@@ -149,11 +149,7 @@ func (u *httpUpstream) callWithRetry(ctx context.Context, original *http.Request
 
 		resp = u.doCall(ctx, original, originalBody, log)
 
-		if resp.err == nil && !slices.Contains(retry.retryOnStatuses, resp.status) {
-			break
-		}
-
-		if attempt == retry.maxRetries {
+		if attempt == retry.maxRetries || !u.shouldRetry(u.cfg.method, resp, retry) {
 			break
 		}
 
@@ -167,6 +163,36 @@ func (u *httpUpstream) callWithRetry(ctx context.Context, original *http.Request
 	}
 
 	return resp
+}
+
+func (u *httpUpstream) shouldRetry(method string, resp *upstreamResponse, retry retryPolicy) bool {
+	if !isIdempotent(method) {
+		return false
+	}
+
+	if resp.err != nil {
+		switch resp.err.kind {
+		case upstreamTimeout, upstreamConnection:
+			return true
+		case upstreamBadStatus:
+			return slices.Contains(retry.retryOnStatuses, resp.status)
+		case upstreamCanceled, upstreamReadError, upstreamBodyTooLarge,
+			upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
+
+			return false
+		}
+	}
+
+	return slices.Contains(retry.retryOnStatuses, resp.status)
+}
+
+func isIdempotent(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (u *httpUpstream) updateCircuitBreaker(resp *upstreamResponse, log *zap.Logger) {
@@ -249,16 +275,6 @@ func (u *httpUpstream) doCall(ctx context.Context, original *http.Request, origi
 
 	span.SetAttributes(attribute.Int("http.status_code", httpResp.StatusCode))
 
-	if httpResp.StatusCode >= http.StatusInternalServerError {
-		log.Error("upstream returned server error", zap.Int("status_code", httpResp.StatusCode))
-		span.SetStatus(codes.Error, http.StatusText(httpResp.StatusCode))
-
-		return &upstreamResponse{
-			status: httpResp.StatusCode,
-			err:    &upstreamError{kind: upstreamBadStatus, err: fmt.Errorf("upstream returned %d", httpResp.StatusCode)},
-		}
-	}
-
 	body, uerr := u.readBody(ctx, httpResp.Body, log)
 	if uerr != nil {
 		span.RecordError(uerr.Unwrap())
@@ -267,11 +283,23 @@ func (u *httpUpstream) doCall(ctx context.Context, original *http.Request, origi
 		return &upstreamResponse{status: httpResp.StatusCode, err: uerr}
 	}
 
-	return &upstreamResponse{
+	resp := &upstreamResponse{
 		status:  httpResp.StatusCode,
 		headers: u.filterHeaders(httpResp.Header),
 		body:    body,
 	}
+
+	if httpResp.StatusCode >= http.StatusInternalServerError {
+		log.Error("upstream returned server error", zap.Int("status_code", httpResp.StatusCode))
+		span.SetStatus(codes.Error, http.StatusText(httpResp.StatusCode))
+
+		resp.err = &upstreamError{
+			kind: upstreamBadStatus,
+			err:  fmt.Errorf("upstream returned %d", httpResp.StatusCode),
+		}
+	}
+
+	return resp
 }
 
 func (u *httpUpstream) readBody(ctx context.Context, body io.ReadCloser, log *zap.Logger) ([]byte, *upstreamError) {
