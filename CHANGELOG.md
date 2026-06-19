@@ -7,7 +7,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.5.1] - YYYY-MM-DD
+## [0.5.1] - 2026-06-19
 
 ### Fixed
 - Retries: `retry_on_statuses` is now honored for 5xx responses. Previously any
