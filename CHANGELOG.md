@@ -9,9 +9,29 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [0.5.1] - YYYY-MM-DD
 
-### Changed
+### Fixed
+- Retries: `retry_on_statuses` is now honored for 5xx responses. Previously any
+  status ≥ 500 was coerced into an error and retried unconditionally, ignoring the
+  configured status list. 5xx and non-5xx are now governed by the same rule.
+- Retries: non-retryable failures (`internal`, `body_too_large`, `policy_violation`,
+  `circuit_open`, `canceled`, `read_error`) are no longer retried — they previously
+  looped until `max_retries` was exhausted with no chance of a different outcome.
+- Upstream errors: response body and headers of 5xx responses are no longer
+  discarded. They are now read and preserved on the upstream response, so error
+  detail is available to logging and downstream handling.
 
-- goccy/go-json instead of stdlib encoding/json
+### Added
+- Retries: idempotency guard. Status-based retries now apply only to idempotent
+  methods (GET, HEAD, OPTIONS, TRACE, PUT, DELETE). Non-idempotent requests (e.g. POST, PATCH)
+  are no longer replayed on a retryable status, preventing duplicate side effects.
+  Transport-failure retries are unaffected.
+
+### Changed
+- Retries: retry decision logic consolidated into a single explicit rule.
+  Transport-level failures (`timeout`, `connection`) are always retryable;
+  status-based retries are driven solely by `retry_on_statuses`; everything else
+  is terminal.
+- Used goccy/go-json instead of stdlib encoding/json
 
 ## [0.5.0] - 2026-05-26
 
