@@ -8,6 +8,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap"
+
+	"github.com/starwalkn/aastro/internal/tlsutil"
 )
 
 var _ = Describe("builder", func() {
@@ -112,7 +114,7 @@ var _ = Describe("builder", func() {
 				},
 			}
 
-			f, err := compileFlow(cfg, nil, nil, zap.NewNop())
+			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
 			Expect(err).To(HaveOccurred())
 			Expect(f).To(BeZero())
 			Expect(err).To(MatchError(ContainSubstring("must have exactly one upstream")))
@@ -132,7 +134,7 @@ var _ = Describe("builder", func() {
 				},
 			}
 
-			f, err := compileFlow(cfg, nil, nil, zap.NewNop())
+			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
 			Expect(err).To(HaveOccurred())
 			Expect(f).To(BeZero())
 			Expect(err).To(MatchError(ContainSubstring("init aggregation")))
@@ -152,7 +154,7 @@ var _ = Describe("builder", func() {
 				},
 			}
 
-			f, err := compileFlow(cfg, nil, nil, zap.NewNop())
+			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeZero())
 			Expect(f.upstreams).To(HaveLen(1))
@@ -174,7 +176,7 @@ var _ = Describe("builder", func() {
 				},
 			}
 
-			f, err := compileFlow(cfg, nil, nil, zap.NewNop())
+			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeZero())
 			Expect(f.upstreams).To(HaveLen(2))
@@ -270,7 +272,7 @@ var _ = Describe("builder", func() {
 					Timeout: 5 * time.Second,
 				}
 
-				u, err := buildUpstream(cfg, nil, nil, zap.NewNop())
+				u, err := buildUpstream(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
 				Expect(err).NotTo(HaveOccurred())
 				Expect(u).NotTo(BeNil())
 				Expect(u.name()).To(Equal("get-test-service:7001-test-service:7002"))

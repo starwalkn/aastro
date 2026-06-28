@@ -34,6 +34,7 @@ type RoutingConfigSet struct {
 
 type RouterBundle struct {
 	Router         *Router
+	TLSRegistry    *tlsutil.Registry
 	MeterProvider  otelcommon.Provider
 	TracerProvider otelcommon.Provider
 	PromRegistry   *prometheus.Registry // nil unless metrics.exporter == "prometheus"
@@ -75,8 +76,10 @@ func NewRouter(ctx context.Context, cfgSet RoutingConfigSet, log *zap.Logger) (R
 		return RouterBundle{}, fmt.Errorf("parse trusted proxies: %w", err)
 	}
 
+	tlsRegistry := tlsutil.NewRegistry()
+
 	for _, fcfg := range routing.Flows {
-		compiledFlow, compileErr := compileFlow(fcfg, trustedProxies, metrics, log)
+		compiledFlow, compileErr := compileFlow(fcfg, trustedProxies, metrics, tlsRegistry, log)
 		if compileErr != nil {
 			return RouterBundle{}, fmt.Errorf("compile flow %q: %w", fcfg.Path, compileErr)
 		}
@@ -88,6 +91,7 @@ func NewRouter(ctx context.Context, cfgSet RoutingConfigSet, log *zap.Logger) (R
 
 	return RouterBundle{
 		Router:         router,
+		TLSRegistry:    tlsRegistry,
 		MeterProvider:  meterProvider,
 		PromRegistry:   promRegistry,
 		TracerProvider: tracerProvider,
@@ -212,8 +216,8 @@ func parseTrustedProxies(proxies []string) ([]*net.IPNet, error) {
 	return result, nil
 }
 
-func compileFlow(cfg FlowConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) (flow, error) {
-	upstreams, err := initUpstreams(cfg.Upstreams, trustedProxies, metrics, log)
+func compileFlow(cfg FlowConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, tlsRegistry *tlsutil.Registry, log *zap.Logger) (flow, error) {
+	upstreams, err := initUpstreams(cfg.Upstreams, trustedProxies, metrics, tlsRegistry, log)
 	if err != nil {
 		return flow{}, fmt.Errorf("init upstreams: %w", err)
 	}
@@ -335,11 +339,11 @@ func compileConflictPolicy(p string) (conflictPolicy, error) {
 	}
 }
 
-func initUpstreams(cfgs []UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) ([]upstream, error) {
+func initUpstreams(cfgs []UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, tlsRegistry *tlsutil.Registry, log *zap.Logger) ([]upstream, error) {
 	upstreams := make([]upstream, 0, len(cfgs))
 
 	for _, cfg := range cfgs {
-		u, err := buildUpstream(cfg, trustedProxies, metrics, log)
+		u, err := buildUpstream(cfg, trustedProxies, metrics, tlsRegistry, log)
 		if err != nil {
 			return nil, fmt.Errorf("build upstream: %w", err)
 		}
@@ -350,8 +354,8 @@ func initUpstreams(cfgs []UpstreamConfig, trustedProxies []*net.IPNet, metrics *
 	return upstreams, nil
 }
 
-func buildUpstream(cfg UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, log *zap.Logger) (upstream, error) {
-	tlsCfg, err := buildUpstreamTLSConfig(cfg.TLS)
+func buildUpstream(cfg UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, tlsRegistry *tlsutil.Registry, log *zap.Logger) (upstream, error) {
+	tlsCfg, err := buildUpstreamTLSConfig(cfg.TLS, tlsRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("build TLS config: %w", err)
 	}
@@ -453,7 +457,7 @@ func buildUpstreamTransport(cfg UpstreamConfig, tlsCfg *tls.Config) (*http.Trans
 	return t, nil
 }
 
-func buildUpstreamTLSConfig(cfg TLSConfig) (*tls.Config, error) {
+func buildUpstreamTLSConfig(cfg TLSConfig, reg *tlsutil.Registry) (*tls.Config, error) {
 	if !cfg.Enabled {
 		return nil, nil //nolint:nilnil // its ok here
 	}
@@ -463,32 +467,21 @@ func buildUpstreamTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 		return nil, err
 	}
 
-	tlsCfg := &tls.Config{
-		MinVersion:         minVer,
-		NextProtos:         []string{"h2", "http/1.1"},
+	reloader, err := tlsutil.NewReloader(tlsutil.ReloaderConfig{
+		CertFile:           cfg.CertFile,
+		CAFile:             cfg.CAFile,
+		KeyFile:            cfg.KeyFile,
 		ServerName:         cfg.ServerName,
-		InsecureSkipVerify: cfg.InsecureSkipVerify, // #nosec G402
+		MinVersion:         minVer,
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	if cfg.CertFile != "" {
-		cert, loadErr := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-		if loadErr != nil {
-			return nil, fmt.Errorf("load client keypair: %w", loadErr)
-		}
+	reg.Register(reloader)
 
-		tlsCfg.Certificates = []tls.Certificate{cert}
-	}
-
-	if cfg.CAFile != "" {
-		pool, loadErr := tlsutil.LoadCAPool(cfg.CAFile)
-		if loadErr != nil {
-			return nil, fmt.Errorf("load upstream CA: %w", loadErr)
-		}
-
-		tlsCfg.RootCAs = pool
-	}
-
-	return tlsCfg, nil
+	return reloader.ClientConfig(), nil
 }
 
 // makeUpstreamName returns the upstream name made up of its method and hosts separated by a hyphen.
