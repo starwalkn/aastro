@@ -7,8 +7,6 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
-
-	"github.com/starwalkn/aastro/internal/tlsutil"
 )
 
 const (
@@ -26,15 +24,20 @@ func WithDebounce(d time.Duration) Option {
 	}
 }
 
+type Registry interface {
+	Dirs() []string
+	ReloadDir(dir string) []error
+}
+
 type Watcher struct {
 	watcher  *fsnotify.Watcher
-	reg      *tlsutil.Registry
+	reg      Registry
 	log      *zap.Logger
 	debounce time.Duration
 	timers   map[string]*time.Timer
 }
 
-func New(w *fsnotify.Watcher, reg *tlsutil.Registry, log *zap.Logger, opts ...Option) *Watcher {
+func New(w *fsnotify.Watcher, reg Registry, log *zap.Logger, opts ...Option) *Watcher {
 	cw := &Watcher{
 		watcher:  w,
 		reg:      reg,

@@ -391,6 +391,8 @@ linters:
       os-temp-dir: true
 
   exclusions:
+    paths:
+      - internal/testutil
     # Log a warning if an exclusion rule is unused.
     # Default: false
     warn-unused: true
