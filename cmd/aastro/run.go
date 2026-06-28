@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -15,9 +14,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/starwalkn/aastro"
+	"github.com/starwalkn/aastro/internal/certwatcher"
 	"github.com/starwalkn/aastro/internal/logger"
 	"github.com/starwalkn/aastro/internal/server"
-	"github.com/starwalkn/aastro/internal/tlsutil"
 )
 
 const (
@@ -83,10 +82,10 @@ func runGateway(cfgPath string) int {
 
 		watcherDone = make(chan struct{})
 
-		cw := newCertWatcher(watcher, bundle.TLSRegistry, log)
+		cw := certwatcher.New(watcher, bundle.TLSRegistry, log)
 		go func() {
 			defer close(watcherDone)
-			cw.run(ctx)
+			cw.Run(ctx)
 		}()
 	}
 
@@ -126,106 +125,4 @@ func runGateway(cfgPath string) int {
 	log.Info("server stopped")
 
 	return 0
-}
-
-const (
-	debounce  = 200 * time.Millisecond
-	reloadOps = fsnotify.Create | fsnotify.Write | fsnotify.Rename
-)
-
-type certWatcher struct {
-	watcher  *fsnotify.Watcher
-	reg      *tlsutil.Registry
-	log      *zap.Logger
-	debounce time.Duration
-	timers   map[string]*time.Timer
-}
-
-func newCertWatcher(w *fsnotify.Watcher, reg *tlsutil.Registry, log *zap.Logger) *certWatcher {
-	return &certWatcher{
-		watcher:  w,
-		reg:      reg,
-		log:      log,
-		debounce: debounce,
-		timers:   make(map[string]*time.Timer),
-	}
-}
-
-func (cw *certWatcher) run(ctx context.Context) {
-	defer cw.stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-
-		case ev, ok := <-cw.watcher.Events:
-			if !ok {
-				return
-			}
-
-			cw.handleEvent(ctx, ev)
-
-		case err, ok := <-cw.watcher.Errors:
-			if !ok {
-				return
-			}
-
-			cw.log.Warn("watcher sends error event", zap.Error(err))
-		}
-	}
-}
-
-func (cw *certWatcher) handleEvent(ctx context.Context, ev fsnotify.Event) {
-	if ev.Op&reloadOps == 0 {
-		return
-	}
-
-	cw.log.Debug(
-		"new tls watcher event",
-		zap.String("event", ev.Name),
-		zap.String("op", ev.Op.String()),
-	)
-
-	dir := filepath.Dir(ev.Name)
-	if t := cw.timers[dir]; t != nil {
-		t.Reset(cw.debounce)
-		return
-	}
-
-	cw.timers[dir] = time.AfterFunc(cw.debounce, func() {
-		cw.reload(ctx, dir)
-	})
-}
-
-func (cw *certWatcher) reload(ctx context.Context, dir string) {
-	if ctx.Err() != nil {
-		return
-	}
-
-	errs := cw.reg.ReloadDir(dir)
-
-	if len(errs) > 0 {
-		for _, err := range errs {
-			cw.log.Error("tls reload failed, keeping old cert",
-				zap.String("dir", dir),
-				zap.Error(err),
-			)
-		}
-		return
-	}
-
-	cw.log.Info("tls certs reloaded", zap.String("dir", dir))
-}
-
-func (cw *certWatcher) stop() {
-	for _, t := range cw.timers {
-		t.Stop()
-	}
-
-	if err := cw.watcher.Close(); err != nil {
-		cw.log.Warn("cannot close tls watcher", zap.Error(err))
-	}
-
-	cw.log.Info("tls watcher stopped")
 }
