@@ -7,9 +7,30 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] - YYYY-MM-DD
+
+### Added
+
+- **Hot reload of TLS certificates.** Aastro watches the directories of the configured `cert_file`,
+  `key_file`, and `ca_file` paths and atomically swaps the in-memory material
+  when they change. New TLS handshakes use the new certificate; in-flight
+  connections are unaffected. No configuration change is required — rotation
+  works on the existing cert paths.
+
+  Directory-level watching handles both atomic file replacement on a host
+  (write-to-temp-then-rename) and Kubernetes secret mounts, where the projected
+  files are updated via symlink swap rather than in-place writes. Certificate
+  rotation through cert-manager, Vault Agent, or SPIFFE/SPIRE sidecars is now
+  hands-off.
+
+  Reloads are validated before they are applied: if a new certificate or CA
+  bundle on disk fails to parse, the error is logged and the previously loaded
+  material stays live, so a malformed rotation cannot take the listener down.
+
 ## [0.5.1] - 2026-06-19
 
 ### Fixed
+
 - Retries: `retry_on_statuses` is now honored for 5xx responses. Previously any
   status ≥ 500 was coerced into an error and retried unconditionally, ignoring the
   configured status list. 5xx and non-5xx are now governed by the same rule.
@@ -21,12 +42,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
   detail is available to logging and downstream handling.
 
 ### Added
+
 - Retries: idempotency guard. Status-based retries now apply only to idempotent
   methods (GET, HEAD, OPTIONS, TRACE, PUT, DELETE). Non-idempotent requests (e.g. POST, PATCH)
   are no longer replayed on a retryable status, preventing duplicate side effects.
   Transport-failure retries are unaffected.
 
 ### Changed
+
 - Retries: retry decision logic consolidated into a single explicit rule.
   Transport-level failures (`timeout`, `connection`) are always retryable;
   status-based retries are driven solely by `retry_on_statuses`; everything else
@@ -38,7 +61,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 
 - New command-line interface and ctl for stub plugins initialization.
-For more information about the CLI, see the [documentation](https://starwalkn.github.io/aastrodocs).
+  For more information about the CLI, see the [documentation](https://starwalkn.github.io/aastrodocs).
 
 ### Changed
 
@@ -59,13 +82,13 @@ For more information about the CLI, see the [documentation](https://starwalkn.gi
 ### ⚠️ Breaking Changes
 
 - The configuration schema has been restructured to separate concerns by listener and
-responsibility. Existing 0.3.x configs will fail to load with a clear validation error
-pointing at the missing sections.
+  responsibility. Existing 0.3.x configs will fail to load with a clear validation error
+  pointing at the missing sections.
 
 - **Admin endpoints moved to a top-level `admin` section.** Previously `server.admin_port`,
-`server.admin_bind_addr`, and `server.pprof` lived inside `server`. They are now grouped
-under their own section, since admin is a separate listener with separate semantics
-(never TLS-terminated, bound to localhost by default, distinct timeouts).
+  `server.admin_bind_addr`, and `server.pprof` lived inside `server`. They are now grouped
+  under their own section, since admin is a separate listener with separate semantics
+  (never TLS-terminated, bound to localhost by default, distinct timeouts).
 
 ```yaml
 # Before (0.3.x)
@@ -88,9 +111,9 @@ gateway:
 ```
 
 - **Observability moved to a top-level `observability` section.** `metrics` and `tracing`
-were previously nested under `server`. They are not server concerns - metrics is either
-scraped from the admin port (Prometheus exporter) or pushed to OTLP, and tracing is
-always push-only.
+  were previously nested under `server`. They are not server concerns - metrics is either
+  scraped from the admin port (Prometheus exporter) or pushed to OTLP, and tracing is
+  always push-only.
 
 ```yaml
 # Before (0.3.x)
@@ -107,18 +130,18 @@ gateway:
 ```
 
 - **pprof no longer has its own port.** Previously `pprof.port` opened a separate listener.
-pprof endpoints now live on the admin port under `/debug/pprof/`, controlled by
-`admin.enable_pprof`. One fewer port to manage and to expose through network policy.
+  pprof endpoints now live on the admin port under `/debug/pprof/`, controlled by
+  `admin.enable_pprof`. One fewer port to manage and to expose through network policy.
 
 - **Flow field `max_parallel_upstreams` renamed to `parallel_upstreams`.** Aligns docs
-with actual behaviour and the code field name. Same semantics, same default
-(`2 × NumCPU`).
+  with actual behaviour and the code field name. Same semantics, same default
+  (`2 × NumCPU`).
 
 ### Added
 
 - **mTLS support, end-to-end.** Both the data port (inbound mTLS) and individual upstreams
-(outbound mTLS) can now be configured with client certificate authentication, custom CA
-bundles, configurable minimum TLS version (1.2 or 1.3), and SNI override.
+  (outbound mTLS) can now be configured with client certificate authentication, custom CA
+  bundles, configurable minimum TLS version (1.2 or 1.3), and SNI override.
 
 ```yaml
 gateway:
@@ -126,7 +149,7 @@ gateway:
     tls:
       enabled: true
       cert_file: /etc/aastro/server.crt
-      key_file:  /etc/aastro/server.key
+      key_file: /etc/aastro/server.key
       client_auth: require        # none | optional | require
       client_ca_file: /etc/aastro/client-ca.crt
       min_version: "1.2"
@@ -137,53 +160,53 @@ gateway:
           - tls:
               enabled: true
               cert_file: /etc/aastro/clients/users.crt
-              key_file:  /etc/aastro/clients/users.key
-              ca_file:   /etc/aastro/internal-ca.crt
+              key_file: /etc/aastro/clients/users.key
+              ca_file: /etc/aastro/internal-ca.crt
               server_name: user-service.internal
 ```
 
 - **Liveness and readiness probes.** New `/__ready` endpoint on the admin port returns
-`200` while the gateway is accepting traffic and `503` once graceful shutdown begins.
-This lets Kubernetes (or any orchestrator with readiness probes) remove the pod from
-service endpoints *before* the data port stops accepting connections, enabling true
-zero-downtime deploys. `/__health` continues to return `200` while the process is alive
-and never checks dependencies.
+  `200` while the gateway is accepting traffic and `503` once graceful shutdown begins.
+  This lets Kubernetes (or any orchestrator with readiness probes) remove the pod from
+  service endpoints *before* the data port stops accepting connections, enabling true
+  zero-downtime deploys. `/__health` continues to return `200` while the process is alive
+  and never checks dependencies.
 
 - **Configurable admin timeout.** New `admin.timeout` field (default `5m`) controls
-read/write timeout on the admin port. Replaces a previously hard-coded constant. The
-generous default exists to accommodate long pprof captures (`/debug/pprof/profile`,
-`/debug/pprof/trace`); production data-port timeouts remain short.
+  read/write timeout on the admin port. Replaces a previously hard-coded constant. The
+  generous default exists to accommodate long pprof captures (`/debug/pprof/profile`,
+  `/debug/pprof/trace`); production data-port timeouts remain short.
 
 - **Configurable header timeouts.** New `server.header_timeout` and `admin.header_timeout`
-fields (default `5s` each) set `http.Server.ReadHeaderTimeout` on the respective listeners.
-Defends against Slowloris-style attacks where a client trickles request headers slowly
-to exhaust the server.
+  fields (default `5s` each) set `http.Server.ReadHeaderTimeout` on the respective listeners.
+  Defends against Slowloris-style attacks where a client trickles request headers slowly
+  to exhaust the server.
 
 - **Structured TLS handshake logging.** `http.Server.ErrorLog` is now wired through the
-gateway's zap logger on both data and admin listeners. TLS handshake failures (failed
-client certificate verification, version mismatch, unsupported cipher) now appear in
-the same structured log stream as the rest of the application instead of escaping to
-stderr via the standard logger.
+  gateway's zap logger on both data and admin listeners. TLS handshake failures (failed
+  client certificate verification, version mismatch, unsupported cipher) now appear in
+  the same structured log stream as the rest of the application instead of escaping to
+  stderr via the standard logger.
 
 ### Changed
 
 - **Admin listener binds to `127.0.0.1` by default.** Previously bound to all interfaces.
-The admin port carries diagnostic endpoints (`/__health`, `/__ready`, `/metrics`,
-`/debug/pprof/`) that should not be exposed externally. Set `admin.bind_addr: 0.0.0.0`
-explicitly if Prometheus scrapes from outside the pod network.
+  The admin port carries diagnostic endpoints (`/__health`, `/__ready`, `/metrics`,
+  `/debug/pprof/`) that should not be exposed externally. Set `admin.bind_addr: 0.0.0.0`
+  explicitly if Prometheus scrapes from outside the pod network.
 
 - **`/metrics` endpoint moved to the admin port.** When `metrics.exporter: prometheus`,
-the endpoint is now served on `admin.port` rather than the data port. This means
-Prometheus can scrape Aastro over plain HTTP without needing a client certificate, even
-when the data port enforces mTLS.
+  the endpoint is now served on `admin.port` rather than the data port. This means
+  Prometheus can scrape Aastro over plain HTTP without needing a client certificate, even
+  when the data port enforces mTLS.
 
 - **Health probe response format changed.** `/__health` now returns
-`{"status": "ok"}` with `Content-Type: application/json` instead of plain text `OK`.
-Consistent with the rest of the gateway's response format.
+  `{"status": "ok"}` with `Content-Type: application/json` instead of plain text `OK`.
+  Consistent with the rest of the gateway's response format.
 
 - **TLS 1.0 and 1.1 are not selectable.** `min_version` accepts only `"1.2"` or `"1.3"`.
-RFC 8996 deprecated 1.0 and 1.1 in 2021, and they are disabled in modern clients
-regardless of server configuration.
+  RFC 8996 deprecated 1.0 and 1.1 in 2021, and they are disabled in modern clients
+  regardless of server configuration.
 
 ### Migration Notes
 
@@ -204,13 +227,13 @@ loading will refuse to start with the old values.
 ### Fixed
 
 - **WaitGroup pooling in scatter.** Removed `sync.Pool` reuse of `sync.WaitGroup` values.
-WaitGroup does not reset to a clean state after use, and pooling it risks counter
-corruption on edge paths. Allocation cost of a fresh WaitGroup per request is negligible.
+  WaitGroup does not reset to a clean state after use, and pooling it risks counter
+  corruption on edge paths. Allocation cost of a fresh WaitGroup per request is negligible.
 
 - **Race on shutdown error reporting.** Fixed a data race in the serve command where the
-listener error and the main goroutine's shutdown path both wrote to the same `err`
-variable. Local variable inside the goroutine now passes the error exclusively through
-the channel.
+  listener error and the main goroutine's shutdown path both wrote to the same `err`
+  variable. Local variable inside the goroutine now passes the error exclusively through
+  the channel.
 
 ## [0.3.1] - 2026-05-11
 
