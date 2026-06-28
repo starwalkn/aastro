@@ -17,6 +17,8 @@ import (
 )
 
 type Server struct {
+	bundle aastro.RouterBundle
+
 	dataServer  *http.Server
 	adminServer *http.Server
 	router      *aastro.Router
@@ -34,7 +36,7 @@ func New(ctx context.Context, cfg aastro.GatewayConfig, version string, log *zap
 		return nil, fmt.Errorf("bootstrap router: %w", err)
 	}
 
-	tlsConfig, err := buildTLSConfig(cfg.Server.TLS)
+	tlsConfig, err := buildTLSConfig(cfg.Server.TLS, bundle.TLSRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("build server TLS config: %w", err)
 	}
@@ -42,6 +44,7 @@ func New(ctx context.Context, cfg aastro.GatewayConfig, version string, log *zap
 	stdLog := zap.NewStdLog(log)
 
 	return &Server{
+		bundle: bundle,
 		dataServer: &http.Server{
 			Addr:              fmt.Sprintf(":%d", cfg.Server.Port),
 			Handler:           buildHandler(bundle),
@@ -64,6 +67,10 @@ func New(ctx context.Context, cfg aastro.GatewayConfig, version string, log *zap
 		log:          log,
 		shuttingDown: shuttingDown,
 	}, nil
+}
+
+func (s *Server) GetBundle() aastro.RouterBundle {
+	return s.bundle
 }
 
 func (s *Server) Start() error {

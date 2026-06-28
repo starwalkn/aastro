@@ -2,20 +2,15 @@ package server
 
 import (
 	"crypto/tls"
-	"fmt"
+	"errors"
 
 	"github.com/starwalkn/aastro"
 	"github.com/starwalkn/aastro/internal/tlsutil"
 )
 
-func buildTLSConfig(cfg aastro.ServerTLSConfig) (*tls.Config, error) {
+func buildTLSConfig(cfg aastro.ServerTLSConfig, reg *tlsutil.Registry) (*tls.Config, error) {
 	if !cfg.Enabled {
 		return nil, nil //nolint:nilnil // its ok here
-	}
-
-	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("load server keypair: %w", err)
 	}
 
 	minVer, err := tlsutil.ParseVersion(cfg.MinVersion)
@@ -28,21 +23,22 @@ func buildTLSConfig(cfg aastro.ServerTLSConfig) (*tls.Config, error) {
 		return nil, err
 	}
 
-	tlsCfg := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   minVer, // #nosec G402
-		ClientAuth:   clientAuth,
-		NextProtos:   []string{"h2", "http/1.1"},
+	if clientAuth != tls.NoClientCert && cfg.ClientCAFile == "" {
+		return nil, errors.New("client_ca_file required when client_auth verifies certs")
 	}
 
-	if clientAuth != tls.NoClientCert {
-		pool, caErr := tlsutil.LoadCAPool(cfg.ClientCAFile)
-		if caErr != nil {
-			return nil, fmt.Errorf("load client CA: %w", caErr)
-		}
-
-		tlsCfg.ClientCAs = pool
+	r, err := tlsutil.NewReloader(tlsutil.ReloaderConfig{
+		CertFile:   cfg.CertFile,
+		CAFile:     cfg.ClientCAFile,
+		KeyFile:    cfg.KeyFile,
+		MinVersion: minVer,
+		ClientAuth: clientAuth,
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return tlsCfg, nil
+	reg.Register(r)
+
+	return r.ServerConfig(), nil
 }
