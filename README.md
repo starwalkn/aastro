@@ -22,6 +22,8 @@ Built with simplicity, performance, and developer-friendly configuration in mind
 
 - 🚀 High-performance HTTP reverse proxy
 - 🔀 Request fan-out & response aggregation (merge, array, namespace)
+- 🔐 TLS & mutual TLS (mTLS) — on the inbound data port and per-upstream 
+- 🔄 Zero-downtime TLS certificate hot-reload — cert-manager / Vault / SPIFFE ready
 - 🧩 Dynamic `.so` plugin system (request & response phase)
 - 🔗 Path parameter extraction and forwarding
 - 🔁 Retry, circuit breaker & load balancing (round-robin, least-conns)
@@ -54,11 +56,50 @@ docker run \
 
 ---
 
+## 🔄 Zero-downtime TLS certificate rotation
+
+Aastro reloads TLS certificates — on both the inbound data port and outbound upstream
+connections — without restarting the process, reloading config, or dropping connections.
+It watches the certificate directories and atomically swaps the in-memory material when the
+files change on disk. No SIGHUP, no full-config reload, no downtime.
+
+Hands-off with your cert manager. Works out of the box with cert-manager, Vault Agent,
+and SPIFFE/SPIRE. Directory-level watching handles both atomic file replacement on a host
+(write-temp-then-rename) and Kubernetes secret mounts, where projected files rotate via
+symlink swap rather than in-place writes.
+Safe by construction. New handshakes use the new certificate; in-flight connections
+finish on the old one. If a rotated certificate or CA bundle fails to parse, the previously
+loaded material stays live — a bad rotation can't take the listener down.
+No configuration required. Rotation works on your existing cert_file, key_file, and
+ca_file paths — there is no flag to enable.
+
+```yaml
+gateway:
+  server:
+    tls:
+      enabled: true
+      cert_file: /etc/aastro/server.crt   # rotate this file → picked up automatically
+      key_file:  /etc/aastro/server.key
+      client_auth: require
+      client_ca_file: /etc/aastro/client-ca.crt
+
+  routing:
+    flows:
+      - upstreams:
+        - tls:
+            enabled: true
+            cert_file: /etc/aastro/clients/users.crt   # outbound mTLS, also hot-reloaded
+            key_file:  /etc/aastro/clients/users.key
+            ca_file:   /etc/aastro/internal-ca.crt
+```
+
+---
+
 ## 📖 Documentation
 
 Full documentation, configuration reference, and plugin guide are available at:
 
-**[starwalkn.github.io/aastrodocs](https://starwalkn.github.io/aastro-docs/)**
+**[starwalkn.github.io/aastro-docs](https://starwalkn.github.io/aastro-docs/)**
 
 ---
 
