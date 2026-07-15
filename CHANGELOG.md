@@ -7,6 +7,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.1] - YYYY-MM-DD
+
+### Added
+
+- Support for the HTTP QUERY method.
+
 ## [0.6.0] - 2026-07-05
 
 ### Added
