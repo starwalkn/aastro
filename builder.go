@@ -76,6 +76,8 @@ func NewRouter(ctx context.Context, cfgSet RoutingConfigSet, log *zap.Logger) (R
 		return RouterBundle{}, fmt.Errorf("parse trusted proxies: %w", err)
 	}
 
+	router.trustedProxies = trustedProxies
+
 	tlsRegistry := tlsutil.NewRegistry()
 
 	for _, fcfg := range routing.Flows {

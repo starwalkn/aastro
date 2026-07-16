@@ -64,6 +64,8 @@ type Router struct {
 	aggregator aggregator
 	flows      []flow
 
+	trustedProxies []*net.IPNet
+
 	log         *zap.Logger
 	metrics     *metric.Metrics
 	rateLimiter *ratelimit.RateLimit
@@ -97,7 +99,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	)
 	defer span.End()
 
-	clientIP := extractClientIP(req)
+	clientIP := extractClientIP(req, r.trustedProxies)
 	ctx = withClientIP(ctx, clientIP)
 	req = req.WithContext(ctx)
 
@@ -421,22 +423,61 @@ func mustMarshal(v any) []byte {
 
 // extractClientIP resolves the real client IP following the chain:
 // X-Forwarded-For → X-Real-IP → RemoteAddr.
-func extractClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+func extractClientIP(r *http.Request, trustedProxies []*net.IPNet) string {
+	peer := remoteIP(r)
+
+	if peer == nil || !ipInNets(peer, trustedProxies) {
+		return peerString(r, peer)
+	}
+
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff != "" {
 		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := net.ParseIP(strings.TrimSpace(parts[i]))
+			if ip == nil {
+				break
+			}
+
+			if !ipInNets(ip, trustedProxies) {
+				return ip.String()
+			}
+		}
 	}
 
-	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-		return xrip
+	if xrip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); xrip != nil {
+		return xrip.String()
 	}
 
+	return peerString(r, peer)
+}
+
+func remoteIP(r *http.Request) net.IP {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
+	if err != nil {
+		host = r.RemoteAddr
+	}
+
+	return net.ParseIP(host)
+}
+
+func peerString(r *http.Request, peer net.IP) string {
+	if peer != nil {
+		return peer.String()
 	}
 
 	return r.RemoteAddr
+}
+
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func getOrCreateRequestID(r *http.Request) string {
