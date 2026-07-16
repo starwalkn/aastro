@@ -510,7 +510,7 @@ func (u *httpUpstream) resolveHeaders(target, original *http.Request, log *zap.L
 
 	clientIP := clientIPFromContext(original.Context())
 	if clientIP == "" {
-		clientIP = extractClientIP(original)
+		clientIP = extractClientIP(original, u.cfg.trustedProxies)
 	}
 
 	parsedClientIP := net.ParseIP(clientIP)
