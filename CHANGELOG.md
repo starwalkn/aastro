@@ -13,6 +13,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 - Support for the HTTP QUERY method.
 
+### Changed
+
+- Client IP is now extracted only from trusted sources: `X-Forwarded-For` and `X-Real-IP` are honored only when the request comes from a `trusted_proxies` peer, with right-to-left XFF parsing. Prevents rate limiter bypass and client IP spoofing via forged headers.
+
 ## [0.6.0] - 2026-07-05
 
 ### Added
