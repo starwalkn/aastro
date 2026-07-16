@@ -109,7 +109,7 @@ type RateLimiterConfig struct {
 
 type FlowConfig struct {
 	Path        string `yaml:"path"   validate:"required,startswith=/"`
-	Method      string `yaml:"method" validate:"required,oneof=GET POST PUT PATCH DELETE HEAD OPTIONS"`
+	Method      string `yaml:"method" validate:"required,oneof=GET POST PUT PATCH DELETE HEAD OPTIONS QUERY"`
 	Passthrough bool   `yaml:"passthrough"`
 
 	Aggregation *AggregationConfig `yaml:"aggregation"  validate:"required_if=Passthrough false"`

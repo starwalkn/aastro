@@ -28,6 +28,8 @@ import (
 	"github.com/starwalkn/aastro/internal/metric"
 )
 
+const methodQuery = "QUERY"
+
 type upstream interface {
 	name() string
 	call(ctx context.Context, original *http.Request, originalBody []byte) *upstreamResponse
@@ -188,7 +190,7 @@ func (u *httpUpstream) shouldRetry(method string, resp *upstreamResponse, retry 
 
 func isIdempotent(method string) bool {
 	switch method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete, methodQuery:
 		return true
 	default:
 		return false
@@ -306,7 +308,11 @@ func (u *httpUpstream) readBody(ctx context.Context, body io.ReadCloser, log *za
 	reader := io.Reader(body)
 
 	if u.cfg.policy.maxResponseBodySize > 0 {
-		log.Debug("applying response body size limit", zap.Int64("limit", u.cfg.policy.maxResponseBodySize))
+		log.Debug("applying response body size limit policy", zap.Int64("limit", u.cfg.policy.maxResponseBodySize))
+
+		// Read one byte past the limit: LimitReader signals exhaustion with io.EOF,
+		// which ReadAll reports as success. The extra byte is the only way to tell
+		// "body ended" from "body was truncated" — see the length check below
 		reader = io.LimitReader(reader, u.cfg.policy.maxResponseBodySize+1)
 	}
 
@@ -386,7 +392,7 @@ func (u *httpUpstream) newRequest(ctx context.Context, original *http.Request, o
 		method = original.Method
 	}
 
-	if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
+	if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch && method != methodQuery {
 		originalBody = nil
 	}
 
