@@ -34,6 +34,7 @@ const (
 	ClientErrInternal             ClientError = "INTERNAL"
 	ClientErrAborted              ClientError = "ABORTED"
 	ClientErrValueConflict        ClientError = "VALUE_CONFLICT"
+	ClientErrUnauthorized         ClientError = "UNAUTHORIZED"
 )
 
 func WriteError(w http.ResponseWriter, code ClientError, status int) {

@@ -12,6 +12,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Support for the HTTP QUERY method.
+- `aastroctl openapi export` — generate an OpenAPI 3.1 (or 3.0) document from a gateway configuration. Response statuses are derived from the actual config: `206` only for best-effort multi-upstream flows, `409` only under `on_conflict: error`, `429` only when the rate limiter is enabled. Flows guarded by the builtin `auth` middleware get a `bearerAuth` security scheme and a `401` response. Passthrough flows are modeled as streamed `*/*` responses. Optional `--extensions` flag embeds `x-aastro` snapshots for future config round-trip (middleware configs and secrets are never serialized). Deterministic output, git-friendly. The config is loaded through the same pipeline as the gateway, so the command doubles as a config validator.
 
 ### Changed
 
