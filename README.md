@@ -10,8 +10,6 @@ Built with simplicity, performance, and developer-friendly configuration in mind
 
 [![Go Version](https://img.shields.io/badge/go-1.26.3-blue)](https://golang.org)
 [![License](https://img.shields.io/github/license/starwalkn/aastro)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/starwalkn/aastro)](https://goreportcard.com/report/github.com/starwalkn/aastro)
-[![codecov](https://codecov.io/gh/starwalkn/aastro/branch/master/graph/badge.svg)](https://codecov.io/gh/starwalkn/aastro)
 ![Docker Pulls](https://img.shields.io/docker/pulls/starwalkn/aastro)
 ![GitHub Created At](https://img.shields.io/github/created-at/starwalkn/aastro)
 [![GitHub release](https://img.shields.io/github/v/release/starwalkn/aastro)](https://github.com/starwalkn/aastro/releases)
