@@ -405,6 +405,8 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 		return http.StatusServiceUnavailable
 	case ClientErrInternal:
 		return http.StatusInternalServerError
+	case ClientErrUnauthorized:
+		return http.StatusUnauthorized
 	}
 
 	return http.StatusInternalServerError
@@ -532,11 +534,12 @@ func computeFingerprint(r *http.Request, flowPath string) string {
 }
 
 const (
-	errPriorityRateLimit   = 100
-	errPriorityPayloadSize = 90
-	errPriorityConflict    = 80
-	errPriorityUpstream    = 50
-	errPriorityInternal    = 10
+	errPriorityRateLimit    = 100
+	errPriorityUnauthorized = 95
+	errPriorityPayloadSize  = 90
+	errPriorityConflict     = 80
+	errPriorityUpstream     = 50
+	errPriorityInternal     = 10
 )
 
 // clientErrorPriority determines which error code wins when multiple are present.
@@ -545,6 +548,8 @@ func errorPriority(e ClientError) int {
 	switch e {
 	case ClientErrRateLimitExceeded:
 		return errPriorityRateLimit
+	case ClientErrUnauthorized:
+		return errPriorityUnauthorized
 	case ClientErrPayloadTooLarge, ClientErrUpstreamBodyTooLarge:
 		return errPriorityPayloadSize
 	case ClientErrValueConflict:

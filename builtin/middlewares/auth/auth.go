@@ -15,6 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
+	"github.com/starwalkn/aastro"
 	"github.com/starwalkn/aastro/internal/logger"
 	"github.com/starwalkn/aastro/sdk"
 )
@@ -274,8 +275,7 @@ func (m *Middleware) unauthorized(w http.ResponseWriter, c authChallenge) {
 		buildWWWAuthenticateHeader(m.realm, c.errorCode, c.errorDescription),
 	)
 
-	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"errors":[{"code":"UNAUTHORIZED"}]}`))
+	aastro.WriteError(w, aastro.ClientErrUnauthorized, http.StatusUnauthorized)
 }
 
 func buildWWWAuthenticateHeader(realm, errorCode, errorDescription string) string {
