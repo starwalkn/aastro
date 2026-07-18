@@ -14,6 +14,8 @@ import (
 	"github.com/starwalkn/aastro/internal/openapi"
 )
 
+const indent = 2
+
 var openapiCmd = &cobra.Command{
 	Use:   "openapi",
 	Short: "OpenAPI tooling for Aastro configurations",
@@ -117,7 +119,7 @@ func marshalOpenAPIDoc(doc *openapi.Document, format string) ([]byte, error) {
 		var sb strings.Builder
 
 		enc := yaml.NewEncoder(&sb)
-		enc.SetIndent(2)
+		enc.SetIndent(indent)
 
 		if err := enc.Encode(doc); err != nil {
 			return nil, fmt.Errorf("marshal yaml: %w", err)
