@@ -41,6 +41,6 @@ jobs:
       - name: Coveralls
         uses: coverallsapp/github-action@v2
         with:
-          github-token: ${{ secrets.COVERALL_TOKEN }}
+          github-token: ${{ github.token }}
           format: golang
           file: ./coverage.out
