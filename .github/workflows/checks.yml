@@ -38,8 +38,9 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
-      - name: Codecov
-        uses: codecov/codecov-action@v6.0.0
+      - name: Coveralls
+        uses: coverallsapp/github-action@v2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.txt
+          github-token: ${{ secrets.COVERALL_TOKEN }}
+          format: golang
+          file: ./coverage.out
