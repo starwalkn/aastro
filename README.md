@@ -13,6 +13,7 @@ Built with simplicity, performance, and developer-friendly configuration in mind
 ![Docker Pulls](https://img.shields.io/docker/pulls/starwalkn/aastro)
 ![GitHub Created At](https://img.shields.io/github/created-at/starwalkn/aastro)
 [![GitHub release](https://img.shields.io/github/v/release/starwalkn/aastro)](https://github.com/starwalkn/aastro/releases)
+[![Coverage Status](https://coveralls.io/repos/github/starwalkn/aastro/badge.svg)](https://coveralls.io/github/starwalkn/aastro)
 
 ---
 
