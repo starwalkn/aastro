@@ -13,12 +13,11 @@ env:
   GOLANGCI_LINT_VERSION: v2.12.2
 
 jobs:
-  checks:
-    name: Test, Lint, Coverage
+  test:
+    name: go:test
     runs-on: ubuntu-22.04
     permissions:
       contents: read
-
     steps:
       - uses: actions/checkout@v4
 
@@ -30,16 +29,49 @@ jobs:
       - name: Test
         run: |
           go install github.com/onsi/ginkgo/v2/ginkgo
-          go get github.com/onsi/gomega/...
-          ginkgo -v -r -coverprofile=coverage.txt -covermode=atomic ./...
+          ginkgo -v -r -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 1
+
+  lint:
+    name: go:lint
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9.2.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
-      - name: Codecov
-        uses: codecov/codecov-action@v6.0.0
+  coverage:
+    name: go:coverage
+    runs-on: ubuntu-22.04
+    needs: test
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download coverage
+        uses: actions/download-artifact@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.txt
+          name: coverage
+
+      - name: Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: coverage.out
