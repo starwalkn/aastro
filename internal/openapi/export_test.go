@@ -36,7 +36,6 @@ func mergeFlow(path string, bestEffort bool, policy string, upstreams ...aastro.
 	return f
 }
 
-//nolint:unparam // this is tests
 func passthroughFlow(path string) aastro.FlowConfig {
 	return aastro.FlowConfig{
 		Path:        path,

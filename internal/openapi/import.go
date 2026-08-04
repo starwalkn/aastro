@@ -10,6 +10,11 @@ import (
 	"github.com/starwalkn/aastro"
 )
 
+const (
+	defaultRateLimit  = 100
+	defaultRateWindow = "1s"
+)
+
 // ImportOptions controls how an OpenAPI document is converted into a gateway
 // configuration.
 type ImportOptions struct {
@@ -131,7 +136,7 @@ func ToConfig(doc *Document, opts ImportOptions) (aastro.Config, []Warning, erro
 	if rateLimited {
 		cfg.Gateway.Routing.RateLimiter = aastro.RateLimiterConfig{
 			Enabled: true,
-			Config:  map[string]interface{}{"limit": 100, "window": "1s"},
+			Config:  map[string]interface{}{"limit": defaultRateLimit, "window": defaultRateWindow},
 		}
 
 		warnings = append(warnings, Warning{
@@ -231,6 +236,8 @@ func reconstructFlow(path, method string, op *Operation) (aastro.FlowConfig, []W
 				MaxIdleConnsPerHost: u.Transport.MaxIdleConnsPerHost,
 				IdleConnTimeout:     parseDurationOr(u.Transport.IdleConnTimeout, 0, flowID, u.Name, "transport idle_conn_timeout", &warnings),
 			}
+		} else {
+			up.Transport = defaultUpstream.Transport
 		}
 
 		if u.TLSEnabled {
