@@ -268,6 +268,8 @@ func isZeroNode(n *yaml.Node) bool {
 		return false
 	case yaml.MappingNode, yaml.SequenceNode:
 		return len(n.Content) == 0
+	case yaml.DocumentNode, yaml.AliasNode:
+		return false
 	default:
 		return false
 	}

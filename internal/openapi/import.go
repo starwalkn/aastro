@@ -71,6 +71,20 @@ func ToConfig(doc *Document, opts ImportOptions) (aastro.Config, []Warning, erro
 		sawExtension bool
 	)
 
+	handle := func(path, method string, op *Operation) {
+		if op.XAastro != nil {
+			sawExtension = true
+		}
+
+		flow, ws := convertOperation(doc, path, method, op, mode, opts)
+		flows = append(flows, flow)
+		warnings = append(warnings, ws...)
+
+		if _, has429 := op.Responses["429"]; has429 {
+			rateLimited = true
+		}
+	}
+
 	for _, path := range sortedPaths(doc.Paths) {
 		item := doc.Paths[path]
 		if item == nil {
@@ -78,36 +92,13 @@ func ToConfig(doc *Document, opts ImportOptions) (aastro.Config, []Warning, erro
 		}
 
 		for _, slot := range methodSlots {
-			op := slot.get(item)
-			if op == nil {
-				continue
-			}
-
-			if op.XAastro != nil {
-				sawExtension = true
-			}
-
-			flow, ws := convertOperation(doc, path, slot.method, op, mode, opts)
-			flows = append(flows, flow)
-			warnings = append(warnings, ws...)
-
-			if _, has429 := op.Responses["429"]; has429 {
-				rateLimited = true
+			if op := slot.get(item); op != nil {
+				handle(path, slot.method, op)
 			}
 		}
 
 		if op := item.XAastroQuery; op != nil {
-			if op.XAastro != nil {
-				sawExtension = true
-			}
-
-			flow, ws := convertOperation(doc, path, methodQuery, op, mode, opts)
-			flows = append(flows, flow)
-			warnings = append(warnings, ws...)
-
-			if _, has429 := op.Responses["429"]; has429 {
-				rateLimited = true
-			}
+			handle(path, methodQuery, op)
 		}
 	}
 
@@ -180,19 +171,7 @@ func reconstructFlow(path, method string, op *Operation) (aastro.FlowConfig, []W
 	}
 
 	if ext.Aggregation != nil {
-		agg := &aastro.AggregationConfig{
-			Strategy:   ext.Aggregation.Strategy,
-			BestEffort: ext.Aggregation.BestEffort,
-		}
-
-		if ext.Aggregation.OnConflict != nil {
-			agg.OnConflict = &aastro.OnConflictConfig{
-				Policy:   ext.Aggregation.OnConflict.Policy,
-				Upstream: ext.Aggregation.OnConflict.PreferUpstream,
-			}
-		}
-
-		flow.Aggregation = agg
+		flow.Aggregation = reconstructAggregation(ext.Aggregation)
 	}
 
 	for _, u := range ext.Upstreams {
@@ -276,6 +255,22 @@ func reconstructFlow(path, method string, op *Operation) (aastro.FlowConfig, []W
 	}
 
 	return flow, warnings
+}
+
+func reconstructAggregation(ext *AggregationExtension) *aastro.AggregationConfig {
+	agg := &aastro.AggregationConfig{
+		Strategy:   ext.Strategy,
+		BestEffort: ext.BestEffort,
+	}
+
+	if ext.OnConflict != nil {
+		agg.OnConflict = &aastro.OnConflictConfig{
+			Policy:   ext.OnConflict.Policy,
+			Upstream: ext.OnConflict.PreferUpstream,
+		}
+	}
+
+	return agg
 }
 
 func reconstructPolicy(p *PolicyExtension, flowID, upstream string, warnings *[]Warning) aastro.PolicyConfig {
