@@ -244,25 +244,40 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("cannot parse configuration file: %w", err)
 	}
 
-	if err = defaults.Set(&cfg); err != nil {
-		return Config{}, fmt.Errorf("cannot apply configuration defaults: %w", err)
+	if err = ValidateConfig(&cfg); err != nil {
+		return Config{}, err
+	}
+
+	return cfg, nil
+}
+
+func DefaultUpstreamConfig() UpstreamConfig {
+	var u UpstreamConfig
+	_ = defaults.Set(&u)
+
+	return u
+}
+
+func ValidateConfig(cfg *Config) error {
+	if err := defaults.Set(cfg); err != nil {
+		return fmt.Errorf("cannot apply configuration defaults: %w", err)
 	}
 
 	v := newValidator()
 
-	if err = v.Struct(&cfg); err != nil {
-		return Config{}, fmt.Errorf("invalid configuration:\n%w", formatValidationError(err))
+	if err := v.Struct(cfg); err != nil {
+		return fmt.Errorf("invalid configuration:\n%w", formatValidationError(err))
 	}
 
 	if cfg.Gateway.Server.Port == cfg.Gateway.Admin.Port {
-		return Config{}, errors.New("server.port and admin.port must differ")
+		return errors.New("server.port and admin.port must differ")
 	}
 
-	if err = validatePathParams(cfg); err != nil {
-		return Config{}, fmt.Errorf("invalid path params configuration: %w", err)
+	if err := validatePathParams(*cfg); err != nil {
+		return fmt.Errorf("invalid path params configuration: %w", err)
 	}
 
-	return cfg, nil
+	return nil
 }
 
 func newValidator() *validator.Validate {
