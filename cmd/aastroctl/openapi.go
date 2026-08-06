@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -21,6 +22,11 @@ var openapiCmd = &cobra.Command{
 	Short: "OpenAPI tooling for Aastro configurations",
 }
 
+func init() {
+	rootCmd.AddCommand(openapiCmd)
+	openapiCmd.AddCommand(newOpenAPIExportCmd(), newOpenAPIImportCmd())
+}
+
 type openapiExportFlags struct {
 	config     string
 	output     string
@@ -32,9 +38,7 @@ type openapiExportFlags struct {
 	extensions bool
 }
 
-func init() {
-	rootCmd.AddCommand(openapiCmd)
-
+func newOpenAPIExportCmd() *cobra.Command {
 	flags := &openapiExportFlags{}
 
 	cmd := &cobra.Command{
@@ -57,7 +61,7 @@ func init() {
 	cmd.Flags().StringVar(&flags.apiVersion, "api-version", "", "info.version (default: 0.0.0)")
 	cmd.Flags().BoolVar(&flags.extensions, "extensions", false, "include x-aastro round-trip extensions")
 
-	openapiCmd.AddCommand(cmd)
+	return cmd
 }
 
 func runOpenAPIExport(cmd *cobra.Command, f openapiExportFlags) error {
@@ -78,25 +82,216 @@ func runOpenAPIExport(cmd *cobra.Command, f openapiExportFlags) error {
 		return err
 	}
 
-	for _, w := range warnings {
-		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
-	}
+	printWarnings(cmd, warnings)
 
 	data, err := marshalOpenAPIDoc(doc, resolveOpenAPIFormat(f.format, f.output))
 	if err != nil {
 		return err
 	}
 
-	if f.output == "" || f.output == "-" {
-		_, err = cmd.OutOrStdout().Write(data)
+	return writeOutput(cmd, f.output, data)
+}
+
+type openapiImportFlags struct {
+	input       string
+	output      string
+	defaultHost string
+	mode        string
+	serverPort  int
+	adminPort   int
+	force       bool
+}
+
+func newOpenAPIImportCmd() *cobra.Command {
+	flags := &openapiImportFlags{}
+
+	cmd := &cobra.Command{
+		Use:   "import",
+		Short: "Generate a gateway configuration from an OpenAPI document",
+		Long: "Documents produced by 'openapi export --extensions' are reconstructed losslessly " +
+			"(except middleware configs, which are never stored in specs). Foreign documents are " +
+			"scaffolded as single-upstream flows. The result passes gateway validation but should " +
+			"be reviewed: check warnings for placeholders and inferred settings.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runOpenAPIImport(cmd, *flags)
+		},
+	}
+
+	cmd.Flags().StringVarP(&flags.input, "in", "i", "", "OpenAPI document to import (yaml or json)")
+	cmd.Flags().StringVarP(&flags.output, "out", "o", "-", "output configuration file ('-' for stdout)")
+	cmd.Flags().StringVar(&flags.defaultHost, "default-host", "", "upstream host for scaffolded flows (default: servers[0] from the document)")
+	cmd.Flags().StringVar(&flags.mode, "mode", "envelope", "flow shape for scaffolded operations: envelope or passthrough")
+	cmd.Flags().IntVar(&flags.serverPort, "server-port", 0, "gateway data port for the generated config (default: 7805)")
+	cmd.Flags().IntVar(&flags.adminPort, "admin-port", 0, "gateway admin port for the generated config (default: 9090)")
+	cmd.Flags().BoolVar(&flags.force, "force", false, "overwrite the output file if it exists")
+
+	_ = cmd.MarkFlagRequired("in")
+
+	return cmd
+}
+
+func runOpenAPIImport(cmd *cobra.Command, f openapiImportFlags) error {
+	if f.output != "-" && !f.force {
+		if _, err := os.Stat(f.output); err == nil {
+			return fmt.Errorf("file already exists: %s (use --force to overwrite)", f.output)
+		}
+	}
+
+	data, err := os.ReadFile(f.input)
+	if err != nil {
+		return fmt.Errorf("read document: %w", err)
+	}
+
+	var doc openapi.Document
+	if err = yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse OpenAPI document: %w", err)
+	}
+
+	cfg, warnings, err := openapi.ToConfig(&doc, openapi.ImportOptions{
+		DefaultHost: f.defaultHost,
+		Mode:        f.mode,
+		ServerPort:  f.serverPort,
+		AdminPort:   f.adminPort,
+	})
+	if err != nil {
 		return err
 	}
 
-	if err = os.WriteFile(f.output, data, 0o600); err != nil {
+	printWarnings(cmd, warnings)
+
+	clone, err := cloneConfig(&cfg)
+	if err != nil {
+		return err
+	}
+
+	if err = aastro.ValidateConfig(clone); err != nil {
+		return fmt.Errorf("generated configuration failed validation (this is a bug, please report it):\n%w", err)
+	}
+
+	out, err := marshalConfigPruned(&cfg)
+	if err != nil {
+		return err
+	}
+
+	return writeOutput(cmd, f.output, out)
+}
+
+func cloneConfig(cfg *aastro.Config) (*aastro.Config, error) {
+	raw, err := cfg.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+
+	var clone aastro.Config
+	if err = yaml.Unmarshal(raw, &clone); err != nil {
+		return nil, fmt.Errorf("clone config: %w", err)
+	}
+
+	return &clone, nil
+}
+
+func marshalConfigPruned(cfg *aastro.Config) ([]byte, error) {
+	raw, err := cfg.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+
+	var node yaml.Node
+	if err = yaml.Unmarshal(raw, &node); err != nil {
+		return nil, fmt.Errorf("reparse config: %w", err)
+	}
+
+	pruneZeroNodes(&node)
+
+	var buf bytes.Buffer
+
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(indent)
+
+	if err = enc.Encode(&node); err != nil {
+		return nil, fmt.Errorf("encode pruned config: %w", err)
+	}
+
+	if err = enc.Close(); err != nil {
+		return nil, fmt.Errorf("close yaml encoder: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// pruneZeroNodes removes zero-valued mapping entries recursively.
+// Safe here because the importer never emits a zero value with non-default
+// meaning, and LoadConfig re-applies defaults on the way back in.
+func pruneZeroNodes(n *yaml.Node) {
+	switch n.Kind {
+	case yaml.DocumentNode:
+		for _, c := range n.Content {
+			pruneZeroNodes(c)
+		}
+	case yaml.MappingNode:
+		kept := make([]*yaml.Node, 0, len(n.Content))
+
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			pruneZeroNodes(value)
+
+			if isZeroNode(value) {
+				continue
+			}
+
+			kept = append(kept, key, value)
+		}
+
+		n.Content = kept
+	case yaml.SequenceNode:
+		for _, c := range n.Content {
+			pruneZeroNodes(c)
+		}
+	case yaml.ScalarNode, yaml.AliasNode:
+		return
+	}
+}
+
+func isZeroNode(n *yaml.Node) bool {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		if n.Tag == "!!null" {
+			return true
+		}
+
+		switch n.Value {
+		case "", "0", "false", "0s":
+			return true
+		}
+
+		return false
+	case yaml.MappingNode, yaml.SequenceNode:
+		return len(n.Content) == 0
+	case yaml.DocumentNode, yaml.AliasNode:
+		return false
+	default:
+		return false
+	}
+}
+
+func printWarnings(cmd *cobra.Command, warnings []openapi.Warning) {
+	for _, w := range warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
+	}
+}
+
+func writeOutput(cmd *cobra.Command, path string, data []byte) error {
+	if path == "" || path == "-" {
+		_, err := cmd.OutOrStdout().Write(data)
+		return err
+	}
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
 
-	fmt.Fprintf(cmd.ErrOrStderr(), "created %s\n", f.output)
+	fmt.Fprintf(cmd.ErrOrStderr(), "created %s\n", path)
 
 	return nil
 }

@@ -5,7 +5,7 @@
 package openapi
 
 // Document is the root OpenAPI object.
-// Field order matches the conventional layout of a hand-written spec.
+// Field order matches the conventional layout of a handwritten spec.
 type Document struct {
 	OpenAPI    string               `yaml:"openapi"              json:"openapi"`
 	Info       Info                 `yaml:"info"                 json:"info"`
@@ -30,9 +30,6 @@ type Tag struct {
 	Name string `yaml:"name" json:"name"`
 }
 
-// PathItem holds one operation per HTTP method.
-// QUERY is not part of the OAS 3.x fixed method set, so flows using it are
-// emitted under the x-aastro-query extension instead of being dropped.
 type PathItem struct {
 	Get     *Operation `yaml:"get,omitempty"     json:"get,omitempty"`
 	Put     *Operation `yaml:"put,omitempty"     json:"put,omitempty"`
@@ -86,9 +83,6 @@ type Header struct {
 	Schema      *Schema `yaml:"schema,omitempty"      json:"schema,omitempty"`
 }
 
-// Schema is a minimal JSON Schema node. The generator only emits shapes valid
-// in both OAS 3.0 and 3.1 (no nullable, no type arrays), which is what keeps
-// dual-version support a one-line difference.
 type Schema struct {
 	Ref         string             `yaml:"$ref,omitempty"        json:"$ref,omitempty"`
 	Type        string             `yaml:"type,omitempty"        json:"type,omitempty"`
@@ -110,23 +104,17 @@ type SecurityScheme struct {
 	Description  string `yaml:"description,omitempty"  json:"description,omitempty"`
 }
 
-// RootExtension identifies the generator so a future `aastroctl openapi import`
-// can recognize its own output and enable lossless round-trip.
 type RootExtension struct {
 	Schema    string `yaml:"schema"    json:"schema"` // aastro config schema version, e.g. "v1"
 	Generator string `yaml:"generator" json:"generator"`
 }
 
-// FlowExtension is a lossless snapshot of the flow attached to each operation
-// when Options.Extensions is enabled. TLS material and plugin/middleware
-// paths are intentionally excluded: specs frequently leave the perimeter.
 type FlowExtension struct {
 	Passthrough bool                  `yaml:"passthrough,omitempty" json:"passthrough,omitempty"`
 	Aggregation *AggregationExtension `yaml:"aggregation,omitempty" json:"aggregation,omitempty"`
 	Upstreams   []UpstreamExtension   `yaml:"upstreams"             json:"upstreams"`
-	// Middlewares carries names only: middleware configs may contain secrets
-	// (hmac_secret and the like) and never belong in an exported spec.
-	Middlewares []string `yaml:"middlewares,omitempty" json:"middlewares,omitempty"`
+	Middlewares []string              `yaml:"middlewares,omitempty" json:"middlewares,omitempty"`
+	Plugins     []string              `yaml:"plugins,omitempty"     json:"plugins,omitempty"`
 }
 
 type AggregationExtension struct {
@@ -149,4 +137,37 @@ type UpstreamExtension struct {
 	ForwardHeaders []string `yaml:"forward_headers,omitempty" json:"forward_headers,omitempty"`
 	ForwardQueries []string `yaml:"forward_queries,omitempty" json:"forward_queries,omitempty"`
 	ForwardParams  []string `yaml:"forward_params,omitempty"  json:"forward_params,omitempty"`
+
+	TLSEnabled bool                `yaml:"tls_enabled,omitempty" json:"tls_enabled,omitempty"`
+	Policy     *PolicyExtension    `yaml:"policy,omitempty"      json:"policy,omitempty"`
+	Transport  *TransportExtension `yaml:"transport,omitempty"   json:"transport,omitempty"`
+}
+
+type PolicyExtension struct {
+	HeaderBlacklist     []string `yaml:"header_blacklist,omitempty"       json:"header_blacklist,omitempty"`
+	AllowedStatuses     []int    `yaml:"allowed_statuses,omitempty"       json:"allowed_statuses,omitempty"`
+	RequireBody         bool     `yaml:"require_body,omitempty"           json:"require_body,omitempty"`
+	MaxResponseBodySize int64    `yaml:"max_response_body_size,omitempty" json:"max_response_body_size,omitempty"`
+
+	Retry          *RetryExtension          `yaml:"retry,omitempty"           json:"retry,omitempty"`
+	CircuitBreaker *CircuitBreakerExtension `yaml:"circuit_breaker,omitempty" json:"circuit_breaker,omitempty"`
+	LoadBalancing  string                   `yaml:"load_balancing,omitempty"  json:"load_balancing,omitempty"`
+}
+
+type RetryExtension struct {
+	MaxRetries      int    `yaml:"max_retries,omitempty"       json:"max_retries,omitempty"`
+	RetryOnStatuses []int  `yaml:"retry_on_statuses,omitempty" json:"retry_on_statuses,omitempty"`
+	BackoffDelay    string `yaml:"backoff_delay,omitempty"     json:"backoff_delay,omitempty"`
+}
+
+type CircuitBreakerExtension struct {
+	Enabled      bool   `yaml:"enabled"                 json:"enabled"`
+	MaxFailures  int    `yaml:"max_failures,omitempty"  json:"max_failures,omitempty"`
+	ResetTimeout string `yaml:"reset_timeout,omitempty" json:"reset_timeout,omitempty"`
+}
+
+type TransportExtension struct {
+	MaxIdleConns        int    `yaml:"max_idle_conns,omitempty"          json:"max_idle_conns,omitempty"`
+	MaxIdleConnsPerHost int    `yaml:"max_idle_conns_per_host,omitempty" json:"max_idle_conns_per_host,omitempty"`
+	IdleConnTimeout     string `yaml:"idle_conn_timeout,omitempty"       json:"idle_conn_timeout,omitempty"`
 }

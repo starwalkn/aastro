@@ -3,6 +3,7 @@ package openapi
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -26,10 +27,8 @@ type Options struct {
 	GeneratorVersion string
 }
 
-// Warning is a non-fatal generation issue. The document is still produced;
-// warnings tell the operator what could not be expressed in OpenAPI terms.
 type Warning struct {
-	Flow    string // "METHOD path" of the affected flow
+	Flow    string
 	Message string
 }
 
@@ -43,24 +42,19 @@ const (
 
 	methodQuery = "QUERY"
 
-	// maxBodySizeNote documents the gateway-wide request body cap
-	// (const maxBodySize in scatter.go). Keep in sync if it becomes configurable.
 	maxBodySizeNote = "Request bodies larger than 5 MiB are rejected with 413."
 
 	schemaClientResponse = "#/components/schemas/ClientResponse"
 
-	// securitySchemeBearer is the shared components.securitySchemes key for
-	// flows guarded by the builtin auth middleware.
 	securitySchemeBearer = "bearerAuth"
 
 	authMiddlewareName = "auth"
 )
 
+var defaultUpstream = aastro.DefaultUpstreamConfig()
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
 
 // FromConfig builds an OpenAPI document from a fully loaded gateway config.
-// The config must come through LoadConfig (defaults applied, validation
-// passed) so the document describes what the gateway will actually execute.
 func FromConfig(cfg aastro.Config, opts Options) (*Document, []Warning, error) {
 	version, err := resolveOASVersion(opts.OASVersion)
 	if err != nil {
@@ -90,8 +84,6 @@ func FromConfig(cfg aastro.Config, opts Options) (*Document, []Warning, error) {
 	rateLimited := cfg.Gateway.Routing.RateLimiter.Enabled
 	tags := make(map[string]struct{})
 
-	// Every flow references the envelope schema: non-passthrough for all
-	// responses, passthrough for its 500/502 (and 401/429) error bodies.
 	needEnvelope := len(cfg.Gateway.Routing.Flows) > 0
 
 	var needAuthScheme bool
@@ -157,9 +149,6 @@ func resolveOASVersion(v string) (string, error) {
 	}
 }
 
-// attachOperation places op into the path item slot for the flow's method.
-// QUERY goes under x-aastro-query (OAS 3.x has a fixed method set).
-// A duplicate method+path pair keeps the first operation and warns.
 func attachOperation(item *PathItem, f aastro.FlowConfig, op *Operation) []Warning {
 	flowID := f.Method + " " + f.Path
 
@@ -279,9 +268,6 @@ func upstreamNames(ups []aastro.UpstreamConfig) string {
 	return strings.Join(names, ", ")
 }
 
-// buildParameters derives the client-visible contract:
-// path params from the flow path, query/header params from the union of
-// what the upstreams actually forward — anything else never reaches a backend.
 func buildParameters(f aastro.FlowConfig) []Parameter {
 	var params []Parameter
 
@@ -312,9 +298,6 @@ func buildParameters(f aastro.FlowConfig) []Parameter {
 	}
 
 	for _, h := range collectForwarded(f.Upstreams, func(u aastro.UpstreamConfig) []string { return u.ForwardHeaders }) {
-		// OAS 3.x: header parameters named Accept, Content-Type, or Authorization
-		// SHALL be ignored by tooling. Content-Type is expressed via requestBody
-		// media types; Authorization belongs to securitySchemes.
 		switch http.CanonicalHeaderKey(h) {
 		case "Accept", "Content-Type", "Authorization":
 			continue
@@ -330,10 +313,6 @@ func buildParameters(f aastro.FlowConfig) []Parameter {
 	return params
 }
 
-// collectForwarded returns the sorted union of forwarded names across
-// upstreams, excluding wildcards ("*") and prefix patterns ("X-Custom-*"),
-// which cannot be enumerated as parameters and are reported in the
-// operation description instead.
 func collectForwarded(ups []aastro.UpstreamConfig, get func(aastro.UpstreamConfig) []string) []string {
 	set := make(map[string]struct{})
 
@@ -406,10 +385,6 @@ func hasRequestBody(method string) bool {
 	}
 }
 
-// envelopeResponses derives the exact set of statuses this flow can produce.
-// This is the payoff of generating from config: 206 appears only where
-// best-effort partials are actually possible, 409 only under
-// on_conflict: error, 429 only when the rate limiter is on.
 func envelopeResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Response {
 	rs := map[string]*Response{
 		"200": envelopeResponse("Successful response."),
@@ -465,8 +440,6 @@ func envelopeResponse(desc string) *Response {
 	}
 }
 
-// stdHeaders returns a fresh map each call: responses must not share header
-// instances, or a future mutation in one response would leak into all.
 func stdHeaders() map[string]*Header {
 	return map[string]*Header{
 		"X-Request-ID": {
@@ -480,8 +453,6 @@ func stdHeaders() map[string]*Header {
 	}
 }
 
-// envelopeSchemas mirrors ClientResponse/ClientError/ResponseMeta from
-// response.go. The ClientError enum must stay in sync with the constants there.
 func envelopeSchemas() map[string]*Schema {
 	return map[string]*Schema{
 		"ClientResponse": {
@@ -527,9 +498,6 @@ func envelopeSchemas() map[string]*Schema {
 	}
 }
 
-// findAuthMiddleware returns the builtin auth middleware of the flow, if any.
-// Custom (source: file) middlewares are not recognized: their semantics are
-// opaque to the generator.
 func findAuthMiddleware(f aastro.FlowConfig) *aastro.MiddlewareConfig {
 	for i := range f.Middlewares {
 		m := &f.Middlewares[i]
@@ -541,8 +509,6 @@ func findAuthMiddleware(f aastro.FlowConfig) *aastro.MiddlewareConfig {
 	return nil
 }
 
-// authNote surfaces non-secret token requirements (issuer/audience) into the
-// operation description. Secrets and key material are never read.
 func authNote(m *aastro.MiddlewareConfig) string {
 	issuer, _ := m.Config["issuer"].(string)
 	audience, _ := m.Config["audience"].(string)
@@ -559,9 +525,6 @@ func authNote(m *aastro.MiddlewareConfig) string {
 	}
 }
 
-// unauthorizedResponse models the auth middleware's 401. The middleware runs
-// before the flow handler, so X-Request-ID/X-Request-Fingerprint are absent;
-// the only guaranteed header is WWW-Authenticate (RFC 6750).
 func unauthorizedResponse() *Response {
 	return &Response{
 		Description: "Missing, malformed, or invalid bearer token.",
@@ -603,6 +566,10 @@ func flowExtension(f aastro.FlowConfig) *FlowExtension {
 		ext.Middlewares = append(ext.Middlewares, m.Name)
 	}
 
+	for _, p := range f.Plugins {
+		ext.Plugins = append(ext.Plugins, p.Name)
+	}
+
 	for _, u := range f.Upstreams {
 		ext.Upstreams = append(ext.Upstreams, UpstreamExtension{
 			Name:           u.Name,
@@ -613,14 +580,59 @@ func flowExtension(f aastro.FlowConfig) *FlowExtension {
 			ForwardHeaders: u.ForwardHeaders,
 			ForwardQueries: u.ForwardQueries,
 			ForwardParams:  u.ForwardParams,
+			TLSEnabled:     u.TLS.Enabled,
+			Policy:         policyExtension(u.Policy),
+			Transport:      transportExtension(u.Transport),
 		})
 	}
 
 	return ext
 }
 
-// operationID produces a stable, unique-per-(method,path) identifier:
-// "GET /api/v2/file/{id}" → "get_api_v2_file_id".
+func policyExtension(p aastro.PolicyConfig) *PolicyExtension {
+	if reflect.DeepEqual(p, aastro.PolicyConfig{}) {
+		return nil
+	}
+
+	ext := &PolicyExtension{
+		HeaderBlacklist:     p.HeaderBlacklist,
+		AllowedStatuses:     p.AllowedStatuses,
+		RequireBody:         p.RequireBody,
+		MaxResponseBodySize: p.MaxResponseBodySize,
+		LoadBalancing:       p.LoadBalancingConfig.Mode,
+	}
+
+	if !reflect.DeepEqual(p.RetryConfig, aastro.RetryConfig{}) {
+		ext.Retry = &RetryExtension{
+			MaxRetries:      p.RetryConfig.MaxRetries,
+			RetryOnStatuses: p.RetryConfig.RetryOnStatuses,
+			BackoffDelay:    p.RetryConfig.BackoffDelay.String(),
+		}
+	}
+
+	if p.CircuitBreakerConfig != (aastro.CircuitBreakerConfig{}) {
+		ext.CircuitBreaker = &CircuitBreakerExtension{
+			Enabled:      p.CircuitBreakerConfig.Enabled,
+			MaxFailures:  p.CircuitBreakerConfig.MaxFailures,
+			ResetTimeout: p.CircuitBreakerConfig.ResetTimeout.String(),
+		}
+	}
+
+	return ext
+}
+
+func transportExtension(t aastro.TransportConfig) *TransportExtension {
+	if t == (aastro.TransportConfig{}) || t == defaultUpstream.Transport {
+		return nil
+	}
+
+	return &TransportExtension{
+		MaxIdleConns:        t.MaxIdleConns,
+		MaxIdleConnsPerHost: t.MaxIdleConnsPerHost,
+		IdleConnTimeout:     t.IdleConnTimeout.String(),
+	}
+}
+
 func operationID(method, path string) string {
 	var b strings.Builder
 
