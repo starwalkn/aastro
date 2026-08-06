@@ -7,7 +7,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.6.1] - 2026-07-18
+## [0.8.0] - 2026-08-06
+
+### Added
+
+- `aastroctl openapi import` — generate a gateway configuration from an OpenAPI 3.x document. Documents produced by `openapi export --extensions` are reconstructed losslessly: flows, aggregation, upstreams, policy, and transport are restored, with default-valued fields elided for a minimal, human-readable result. Foreign documents are scaffolded as single-upstream flows, with hosts taken from `--default-host` or `servers[]`. Passthrough flows are detected from streamed `*/*` responses, and the rate limiter is inferred from `429` responses. Secrets are never restored: plugin/middleware configs and TLS certificate paths are reported as warnings for manual re-adding. The generated config is validated before output, so `import` never emits a config the gateway would reject.
+
+## [0.7.0] - 2026-07-18
 
 ### Added
 
