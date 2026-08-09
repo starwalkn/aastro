@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/starwalkn/aastro"
@@ -409,6 +410,8 @@ func envelopeResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Respon
 		rs["429"] = envelopeResponse("Rate limit exceeded.")
 	}
 
+	addPropagatedStatuses(rs, f)
+
 	return rs
 }
 
@@ -478,6 +481,8 @@ func envelopeSchemas() map[string]*Schema {
 				"UPSTREAM_BODY_TOO_LARGE",
 				"UPSTREAM_UNAVAILABLE",
 				"UPSTREAM_ERROR",
+				"UPSTREAM_CLIENT_ERROR",
+				"UPSTREAM_REDIRECT",
 				"UPSTREAM_MALFORMED",
 				"INTERNAL",
 				"ABORTED",
@@ -599,6 +604,7 @@ func policyExtension(p aastro.PolicyConfig) *PolicyExtension {
 		AllowedStatuses:     p.AllowedStatuses,
 		RequireBody:         p.RequireBody,
 		MaxResponseBodySize: p.MaxResponseBodySize,
+		FollowRedirects:     p.FollowRedirects,
 		LoadBalancing:       p.LoadBalancingConfig.Mode,
 	}
 
@@ -631,6 +637,88 @@ func transportExtension(t aastro.TransportConfig) *TransportExtension {
 		MaxIdleConnsPerHost: t.MaxIdleConnsPerHost,
 		IdleConnTimeout:     t.IdleConnTimeout.String(),
 	}
+}
+
+func addPropagatedStatuses(rs map[string]*Response, f aastro.FlowConfig) {
+	allowed, open := allowedStatuses(f)
+
+	if len(f.Upstreams) == 1 && !open {
+		for _, status := range allowed {
+			key := strconv.Itoa(status)
+			if _, exists := rs[key]; exists {
+				continue
+			}
+
+			rs[key] = allowedStatusResponse(status)
+		}
+
+		return
+	}
+
+	if !open {
+		return
+	}
+
+	rs["default"] = &Response{
+		Description: propagationNote(len(f.Upstreams)),
+		Headers:     stdHeaders(),
+		Content: map[string]MediaType{
+			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
+		},
+	}
+}
+
+func allowedStatuses(f aastro.FlowConfig) (statuses []int, open bool) {
+	set := make(map[int]struct{})
+
+	for _, u := range f.Upstreams {
+		if len(u.Policy.AllowedStatuses) == 0 {
+			open = true
+			continue
+		}
+
+		for _, s := range u.Policy.AllowedStatuses {
+			set[s] = struct{}{}
+		}
+	}
+
+	statuses = make([]int, 0, len(set))
+	for s := range set {
+		statuses = append(statuses, s)
+	}
+
+	sort.Ints(statuses)
+
+	return statuses, open
+}
+
+func propagationNote(upstreamCount int) string {
+	if upstreamCount == 1 {
+		return "Upstream status propagated verbatim. A single-upstream flow acts as a proxy: " +
+			"redirects and client errors (3xx, 4xx) returned by the upstream reach the client unchanged, " +
+			"with the upstream body carried in `data` when it is valid JSON. " +
+			"Server errors and transport failures are reported as 502 instead."
+	}
+
+	return "Upstream status propagated verbatim. When every failing upstream returns the same " +
+		"client error status (typically 401 or 403 from a shared auth layer), that status is " +
+		"forwarded instead of 502."
+}
+
+func allowedStatusResponse(status int) *Response {
+	if status == http.StatusNoContent || status == http.StatusNotModified {
+		return &Response{
+			Description: "Upstream returned " + strconv.Itoa(status) + "; no response body.",
+			Headers:     stdHeaders(),
+		}
+	}
+
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		return envelopeResponse("Successful response (upstream status " + strconv.Itoa(status) + ").")
+	}
+
+	return envelopeResponse("Upstream status " + strconv.Itoa(status) +
+		", declared acceptable via `allowed_statuses` and propagated to the client.")
 }
 
 func operationID(method, path string) string {

@@ -374,15 +374,27 @@ func buildUpstream(cfg UpstreamConfig, trustedProxies []*net.IPNet, metrics *met
 		)
 	}
 
+	client := &http.Client{Transport: transport, Timeout: cfg.Timeout}
+	streamClient := &http.Client{Transport: transport}
+
+	if !cfg.Policy.FollowRedirects {
+		client.CheckRedirect = noRedirect
+		streamClient.CheckRedirect = noRedirect
+	}
+
 	return &httpUpstream{
 		cfg:            buildUpstreamConfig(cfg, trustedProxies),
 		state:          buildUpstreamState(cfg.Hosts),
 		circuitBreaker: buildCircuitBreaker(cfg.Policy.CircuitBreakerConfig),
 		metrics:        metrics,
 		log:            log,
-		client:         &http.Client{Transport: transport, Timeout: cfg.Timeout},
-		streamClient:   &http.Client{Transport: transport},
+		client:         client,
+		streamClient:   streamClient,
 	}, nil
+}
+
+func noRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 func buildUpstreamConfig(cfg UpstreamConfig, trustedProxies []*net.IPNet) upstreamConfig {

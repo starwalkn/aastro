@@ -11,6 +11,7 @@ type aggregatedResponse struct {
 	data    json.RawMessage
 	headers http.Header
 	errors  []ClientError
+	status  int
 	partial bool
 }
 
@@ -56,12 +57,34 @@ func (a *defaultAggregator) aggregate(upstreams []upstream, responses []upstream
 
 func (a *defaultAggregator) rawResponse(resp upstreamResponse) aggregatedResponse {
 	if resp.err != nil {
-		return aggregatedResponse{errors: []ClientError{a.mapUpstreamError(resp.err)}}
+		switch resp.err.kind {
+		case upstreamClientError, upstreamRedirect:
+			out := aggregatedResponse{
+				headers: resp.headers,
+				status:  resp.status,
+			}
+
+			if json.Valid(resp.body) {
+				out.data = resp.body
+			} else {
+				out.errors = []ClientError{a.mapUpstreamError(resp.err)}
+			}
+
+			return out
+		case upstreamTimeout, upstreamCanceled, upstreamConnection,
+			upstreamBadStatus, upstreamReadError, upstreamBodyTooLarge,
+			upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
+
+			return aggregatedResponse{errors: []ClientError{a.mapUpstreamError(resp.err)}}
+		default:
+			return aggregatedResponse{errors: []ClientError{a.mapUpstreamError(resp.err)}}
+		}
 	}
 
 	return aggregatedResponse{
 		data:    resp.body,
 		headers: mergeSuccessfulHeaders([]upstreamResponse{resp}),
+		status:  resp.status,
 	}
 }
 
@@ -114,7 +137,11 @@ func (a *defaultAggregator) collectFields(
 			)
 
 			if !agg.bestEffort {
-				r := aggregatedResponse{errors: dedupeErrors(a.collectErrors(responses))}
+				r := aggregatedResponse{
+					errors: dedupeErrors(a.collectErrors(responses)),
+					status: sharedFailureStatus(responses),
+				}
+
 				return nil, nil, false, &r
 			}
 
@@ -125,7 +152,7 @@ func (a *defaultAggregator) collectFields(
 
 		hasSuccessful = true
 
-		if resp.body == nil {
+		if len(resp.body) == 0 {
 			continue
 		}
 
@@ -195,7 +222,10 @@ func (a *defaultAggregator) arrayed(responses []upstreamResponse, agg aggregatio
 			)
 
 			if !agg.bestEffort {
-				return aggregatedResponse{errors: dedupeErrors(a.collectErrors(responses))}
+				return aggregatedResponse{
+					errors: dedupeErrors(a.collectErrors(responses)),
+					status: sharedFailureStatus(responses),
+				}
 			}
 
 			aggErrors = append(aggErrors, a.mapUpstreamError(resp.err))
@@ -205,7 +235,7 @@ func (a *defaultAggregator) arrayed(responses []upstreamResponse, agg aggregatio
 
 		hasSuccessful = true
 
-		if resp.body != nil {
+		if len(resp.body) > 0 {
 			arr = append(arr, resp.body)
 		}
 	}
@@ -236,7 +266,10 @@ func (a *defaultAggregator) namespaced(upstreams []upstream, responses []upstrea
 
 		if resp.err != nil {
 			if !agg.bestEffort {
-				return aggregatedResponse{errors: []ClientError{a.mapUpstreamError(resp.err)}}
+				return aggregatedResponse{
+					errors: []ClientError{a.mapUpstreamError(resp.err)},
+					status: sharedFailureStatus(responses),
+				}
 			}
 
 			aggErrors = append(aggErrors, a.mapUpstreamError(resp.err))
@@ -246,7 +279,7 @@ func (a *defaultAggregator) namespaced(upstreams []upstream, responses []upstrea
 
 		hasSuccessful = true
 
-		if resp.body == nil {
+		if len(resp.body) == 0 {
 			result[name] = json.RawMessage("null")
 		} else {
 			result[name] = resp.body
@@ -306,6 +339,10 @@ func (a *defaultAggregator) mapUpstreamError(err *upstreamError) ClientError {
 		return ClientErrUpstreamUnavailable
 	case upstreamBadStatus:
 		return ClientErrUpstreamError
+	case upstreamClientError:
+		return ClientErrUpstreamClientError
+	case upstreamRedirect:
+		return ClientErrUpstreamRedirect
 	case upstreamBodyTooLarge:
 		return ClientErrUpstreamBodyTooLarge
 	case upstreamCanceled:
@@ -334,4 +371,29 @@ func dedupeErrors(errs []ClientError) []ClientError {
 		}
 	}
 	return out
+}
+
+func sharedFailureStatus(responses []upstreamResponse) int {
+	status := 0
+
+	for _, r := range responses {
+		if r.err == nil {
+			continue
+		}
+
+		if r.err.kind != upstreamClientError {
+			return 0
+		}
+
+		if status == 0 {
+			status = r.status
+			continue
+		}
+
+		if status != r.status {
+			return 0
+		}
+	}
+
+	return status
 }

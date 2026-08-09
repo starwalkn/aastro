@@ -62,12 +62,22 @@ const (
 	upstreamTimeout         upstreamErrorKind = "timeout"
 	upstreamCanceled        upstreamErrorKind = "canceled"
 	upstreamConnection      upstreamErrorKind = "connection"
-	upstreamBadStatus       upstreamErrorKind = "bad_status"
+	upstreamRedirect        upstreamErrorKind = "redirect"     // 3XX
+	upstreamClientError     upstreamErrorKind = "client_error" // 4XX
+	upstreamBadStatus       upstreamErrorKind = "bad_status"   // 5XX
 	upstreamReadError       upstreamErrorKind = "read_error"
 	upstreamBodyTooLarge    upstreamErrorKind = "body_too_large"
 	upstreamCircuitOpen     upstreamErrorKind = "circuit_open"
 	upstreamInternal        upstreamErrorKind = "internal"
 	upstreamPolicyViolation upstreamErrorKind = "policy_violation"
+)
+
+type breakerOutcome uint8
+
+const (
+	breakerNoSignal breakerOutcome = iota
+	breakerSuccess
+	breakerFailure
 )
 
 type httpUpstream struct {
@@ -130,6 +140,12 @@ func (u *httpUpstream) callWithRetry(ctx context.Context, original *http.Request
 
 	for attempt := 0; attempt <= retry.maxRetries; attempt++ {
 		if attempt > 0 {
+			log.Debug("retrying upstream call",
+				zap.Int("attempt", attempt),
+				zap.Int("max_retries", retry.maxRetries),
+				zap.Int("previous_status", resp.status),
+			)
+
 			u.metrics.IncUpstreamRetriesTotal(routeFromContext(ctx), u.cfg.name)
 		}
 
@@ -176,10 +192,10 @@ func (u *httpUpstream) shouldRetry(method string, resp *upstreamResponse, retry 
 		switch resp.err.kind {
 		case upstreamTimeout, upstreamConnection:
 			return true
-		case upstreamBadStatus:
+		case upstreamBadStatus, upstreamClientError:
 			return slices.Contains(retry.retryOnStatuses, resp.status)
-		case upstreamCanceled, upstreamReadError, upstreamBodyTooLarge,
-			upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
+		case upstreamCanceled, upstreamReadError, upstreamBodyTooLarge, upstreamCircuitOpen,
+			upstreamInternal, upstreamPolicyViolation, upstreamRedirect:
 
 			return false
 		}
@@ -202,11 +218,16 @@ func (u *httpUpstream) updateCircuitBreaker(resp *upstreamResponse, log *zap.Log
 		return
 	}
 
-	if resp.err != nil && u.isBreakerFailure(resp.err) {
+	switch breakerOutcomeFor(resp.err) {
+	case breakerFailure:
 		log.Error("upstream request failed, recording circuit breaker failure")
 		u.circuitBreaker.OnFailure()
-	} else {
+	case breakerSuccess:
 		u.circuitBreaker.OnSuccess()
+	case breakerNoSignal:
+		// The request never reached the upstream — denied by the breaker itself,
+		// canceled by the client, or never built. Recording success here would
+		// let an open breaker reset itself with the very request it rejected.
 	}
 
 	u.metrics.SetCircuitBreakerState(u.cfg.name, float64(u.circuitBreaker.State()))
@@ -215,6 +236,10 @@ func (u *httpUpstream) updateCircuitBreaker(resp *upstreamResponse, log *zap.Log
 // applyPolicy validates the response against the upstream's own policy rules.
 // Violations are merged into resp.err so the original error kind is preserved.
 func (u *httpUpstream) applyPolicy(ctx context.Context, resp *upstreamResponse) {
+	if resp.err != nil && !isStatusFailure(resp.err.kind) {
+		return
+	}
+
 	var errs []error
 
 	if u.cfg.policy.requireBody && len(resp.body) == 0 {
@@ -232,10 +257,34 @@ func (u *httpUpstream) applyPolicy(ctx context.Context, resp *upstreamResponse) 
 	u.metrics.IncUpstreamErrorsTotal(routeFromContext(ctx), u.cfg.name, "policy_violation")
 
 	combined := errors.Join(errs...)
-	if resp.err == nil {
-		resp.err = &upstreamError{err: combined, kind: upstreamPolicyViolation}
-	} else {
+
+	switch {
+	case resp.err == nil:
+		resp.err = &upstreamError{kind: upstreamPolicyViolation, err: combined}
+	case resp.err.kind == upstreamClientError, resp.err.kind == upstreamRedirect:
+		// An explicit allowed_statuses list is a contract. A status outside it is a
+		// broken upstream, not an answer worth forwarding — so the propagatable
+		// kinds are downgraded to a policy violation (502)
+		resp.err = &upstreamError{
+			kind: upstreamPolicyViolation,
+			err:  errors.Join(resp.err.err, combined),
+		}
+	default:
+		// 5xx keeps bad_status: it must keep feeding the circuit breaker
 		resp.err.err = errors.Join(resp.err.err, combined)
+	}
+}
+
+func isStatusFailure(kind upstreamErrorKind) bool {
+	switch kind {
+	case upstreamBadStatus, upstreamClientError, upstreamRedirect:
+		return true
+	case upstreamTimeout, upstreamCanceled, upstreamConnection, upstreamReadError,
+		upstreamBodyTooLarge, upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
+
+		return false
+	default:
+		return false
 	}
 }
 
@@ -291,12 +340,20 @@ func (u *httpUpstream) doCall(ctx context.Context, original *http.Request, origi
 		body:    body,
 	}
 
-	if httpResp.StatusCode >= http.StatusInternalServerError {
-		log.Error("upstream returned server error", zap.Int("status_code", httpResp.StatusCode))
-		span.SetStatus(codes.Error, http.StatusText(httpResp.StatusCode))
+	if kind, failed := u.classifyStatus(httpResp.StatusCode); failed {
+		if kind == upstreamBadStatus {
+			log.Error("upstream returned server error", zap.Int("status_code", httpResp.StatusCode))
+			span.SetStatus(codes.Error, http.StatusText(httpResp.StatusCode))
+		} else {
+			log.Debug(
+				"upstream returned non-success status",
+				zap.Int("status_code", httpResp.StatusCode),
+				zap.String("kind", string(kind)),
+			)
+		}
 
 		resp.err = &upstreamError{
-			kind: upstreamBadStatus,
+			kind: kind,
 			err:  fmt.Errorf("upstream returned %d", httpResp.StatusCode),
 		}
 	}
@@ -350,6 +407,23 @@ func (u *httpUpstream) filterHeaders(headers http.Header) http.Header {
 	return filtered
 }
 
+func (u *httpUpstream) classifyStatus(status int) (upstreamErrorKind, bool) {
+	if slices.Contains(u.cfg.policy.allowedStatuses, status) {
+		return "", false
+	}
+
+	switch {
+	case status >= http.StatusInternalServerError:
+		return upstreamBadStatus, true
+	case status >= http.StatusBadRequest:
+		return upstreamClientError, true
+	case status >= http.StatusMultipleChoices:
+		return upstreamRedirect, true
+	default:
+		return "", false
+	}
+}
+
 func (u *httpUpstream) classifyDoError(err error) upstreamErrorKind {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
@@ -361,18 +435,24 @@ func (u *httpUpstream) classifyDoError(err error) upstreamErrorKind {
 	}
 }
 
-func (u *httpUpstream) isBreakerFailure(uerr *upstreamError) bool {
+// breakerOutcomeFor answers one question: what does this result say about the
+// upstream's health? A complete HTTP response - whatever its status - proves
+// the upstream is alive; a transport failure proves it is not; anything that
+// never left the gateway proves nothing.
+func breakerOutcomeFor(uerr *upstreamError) breakerOutcome {
 	if uerr == nil {
-		return false
+		return breakerSuccess
 	}
 
 	switch uerr.kind {
-	case upstreamTimeout, upstreamConnection, upstreamBadStatus:
-		return true
-	case upstreamCanceled, upstreamReadError, upstreamBodyTooLarge, upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
-		return false
+	case upstreamTimeout, upstreamConnection, upstreamBadStatus, upstreamReadError:
+		return breakerFailure
+	case upstreamClientError, upstreamRedirect, upstreamPolicyViolation, upstreamBodyTooLarge:
+		return breakerSuccess
+	case upstreamCircuitOpen, upstreamCanceled, upstreamInternal:
+		return breakerNoSignal
 	default:
-		return false
+		return breakerNoSignal
 	}
 }
 

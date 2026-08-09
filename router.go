@@ -306,8 +306,8 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 		zap.Bool("partial", aggregated.partial),
 	)
 
-	status := r.statusFromErrors(aggregated.errors, aggregated.partial)
-	body := r.buildResponseBody(aggregated, requestID)
+	status := r.resolveStatus(aggregated)
+	body := r.buildResponseBody(aggregated, requestID, status)
 
 	return &http.Response{
 		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
@@ -318,7 +318,12 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 	}
 }
 
-func (r *Router) buildResponseBody(aggregated aggregatedResponse, requestID string) []byte {
+func (r *Router) buildResponseBody(aggregated aggregatedResponse, requestID string, status int) []byte {
+	// RFC 9110
+	if status == http.StatusNoContent || status == http.StatusNotModified {
+		return nil
+	}
+
 	switch {
 	case len(aggregated.errors) > 0 && !aggregated.partial:
 		return mustMarshal(ClientResponse{
@@ -368,6 +373,18 @@ func (r *Router) copyResponse(w http.ResponseWriter, resp *http.Response) {
 	}
 }
 
+func (r *Router) resolveStatus(agg aggregatedResponse) int {
+	if agg.partial {
+		return http.StatusPartialContent
+	}
+
+	if agg.status != 0 {
+		return agg.status
+	}
+
+	return r.statusFromErrors(agg.errors, false)
+}
+
 // statusFromErrors maps aggregation errors to the most appropriate HTTP status code.
 // partial takes precedence: even with errors, 206 signals a partial success.
 func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
@@ -395,7 +412,9 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 		return http.StatusTooManyRequests
 	case ClientErrPayloadTooLarge:
 		return http.StatusRequestEntityTooLarge
-	case ClientErrUpstreamBodyTooLarge, ClientErrUpstreamUnavailable, ClientErrUpstreamError, ClientErrUpstreamMalformed:
+	case ClientErrUpstreamBodyTooLarge, ClientErrUpstreamUnavailable, ClientErrUpstreamError,
+		ClientErrUpstreamMalformed, ClientErrUpstreamClientError, ClientErrUpstreamRedirect:
+
 		return http.StatusBadGateway
 	case ClientErrValueConflict:
 		return http.StatusConflict
@@ -554,7 +573,9 @@ func errorPriority(e ClientError) int {
 		return errPriorityPayloadSize
 	case ClientErrValueConflict:
 		return errPriorityConflict
-	case ClientErrUpstreamUnavailable, ClientErrUpstreamError, ClientErrUpstreamMalformed, ClientErrAborted:
+	case ClientErrUpstreamUnavailable, ClientErrUpstreamError, ClientErrUpstreamMalformed,
+		ClientErrAborted, ClientErrUpstreamClientError, ClientErrUpstreamRedirect:
+
 		return errPriorityUpstream
 	case ClientErrInternal:
 		return errPriorityInternal

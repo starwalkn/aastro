@@ -180,6 +180,7 @@ type PolicyConfig struct {
 	AllowedStatuses     []int    `yaml:"allowed_statuses"`
 	RequireBody         bool     `yaml:"require_body"`
 	MaxResponseBodySize int64    `yaml:"max_response_body_size"`
+	FollowRedirects     bool     `yaml:"follow_redirects"`
 
 	RetryConfig          RetryConfig          `yaml:"retry"`
 	CircuitBreakerConfig CircuitBreakerConfig `yaml:"circuit_breaker"`
