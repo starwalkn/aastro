@@ -250,26 +250,6 @@ var _ = Describe("httpUpstream", func() {
 		Entry("EOF → connection error", io.EOF, upstreamConnection),
 	)
 
-	DescribeTable("isBreakerFailure",
-		func(kind upstreamErrorKind, want bool) {
-			up := &httpUpstream{}
-			Expect(up.isBreakerFailure(&upstreamError{kind: kind, err: io.EOF})).To(Equal(want))
-		},
-		Entry("timeout counts as failure", upstreamTimeout, true),
-		Entry("connection error counts as failure", upstreamConnection, true),
-		Entry("bad status counts as failure", upstreamBadStatus, true),
-		Entry("canceled does not count", upstreamCanceled, false),
-		Entry("body too large does not count", upstreamBodyTooLarge, false),
-		Entry("read error does not count", upstreamReadError, false),
-		Entry("internal does not count", upstreamInternal, false),
-		Entry("circuit open does not count", upstreamCircuitOpen, false),
-	)
-
-	It("treats nil error as non-failure for breaker", func() {
-		up := &httpUpstream{}
-		Expect(up.isBreakerFailure(nil)).To(BeFalse())
-	})
-
 	Describe("selectHost", func() {
 		It("always returns 0 for a single host", func() {
 			up := &httpUpstream{

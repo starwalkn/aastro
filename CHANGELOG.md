@@ -7,22 +7,77 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.1] — 2026-08-09
+
+### Added
+
+- `policy.follow_redirects` - per-upstream option controlling whether the gateway follows upstream redirects. Defaults
+  to `false`: a 3xx is now propagated to the client instead of being chased. Set it to `true` to restore the previous
+  behavior, keeping in mind that the redirect is followed with the upstream's own TLS configuration and that Go strips
+  `Authorization` and `Cookie` on cross-host hops.
+- New client error codes `UPSTREAM_CLIENT_ERROR` and `UPSTREAM_REDIRECT`, distinguishing an upstreams answer to the
+  client from an upstream failure.
+
+### Changed
+
+- Upstream responses are now classified by status class rather than the single `>= 500` check. 5xx and transport
+  failures remain gateway failures (502, upstream body dropped); 3xx and 4xx are treated as answers addressed to the
+  client.
+- Single-upstream flows propagate the upstream status verbatim - a 404, 401, or 302 from the upstream now reaches the
+  client as a 404, 401, or 302. Aggregating flows are unaffected: a status is only propagated when every failed upstream
+  agreed on it, otherwise the response stays 502.
+- `allowed_statuses` is now enforced as a contract in both directions: a status on the list is always a success (its
+  body flows into `data`), and a status outside a non-empty list is a policy violation returning 502
+  `UPSTREAM_MALFORMED`, even for statuses that would otherwise be propagated.
+- Client errors and redirects no longer count as circuit breaker failures - a burst of 404s can no longer take a healthy
+  upstream out of rotation.
+- Responses with statuses that cannot carry a body (204, 304) are no longer wrapped in the JSON envelope.
+- Upstream policy validation is skipped for transport-level failures, which previously produced misleading
+  `empty body not allowed` and `status 0 not in allowed list` messages on timeouts.
+
+### Fixed
+
+- A single-upstream flow returned **200** with the upstream's error body when the upstream answered 404, 401, or any
+  other non-2xx status outside `allowed_statuses`. Clients received a success for a request that failed.
+- The circuit breaker reset itself with the very request it rejected: a denied call was recorded as a success, so an
+  open breaker closed after blocking a single request instead of staying open until `reset_timeout`.
+- Retries never fired for upstreams without an explicit `method:`. Retry eligibility was judged against the raw
+  configured method rather than the effective one, so the empty default was never considered idempotent.
+- Empty upstream bodies (204, or 200 with no content) were reported as `UPSTREAM_MALFORMED` during aggregation, turning
+  a successful fan-out into a 206 partial response.
+- Aggregation error responses now carry the retried status correctly; an aborted read no longer produces a
+  redirect-shaped `errors` entry for legitimately empty 3xx bodies.
+
 ## [0.8.0] - 2026-08-06
 
 ### Added
 
-- `aastroctl openapi import` — generate a gateway configuration from an OpenAPI 3.x document. Documents produced by `openapi export --extensions` are reconstructed losslessly: flows, aggregation, upstreams, policy, and transport are restored, with default-valued fields elided for a minimal, human-readable result. Foreign documents are scaffolded as single-upstream flows, with hosts taken from `--default-host` or `servers[]`. Passthrough flows are detected from streamed `*/*` responses, and the rate limiter is inferred from `429` responses. Secrets are never restored: plugin/middleware configs and TLS certificate paths are reported as warnings for manual re-adding. The generated config is validated before output, so `import` never emits a config the gateway would reject.
+- `aastroctl openapi import` — generate a gateway configuration from an OpenAPI 3.x document. Documents produced by
+  `openapi export --extensions` are reconstructed losslessly: flows, aggregation, upstreams, policy, and transport are
+  restored, with default-valued fields elided for a minimal, human-readable result. Foreign documents are scaffolded as
+  single-upstream flows, with hosts taken from `--default-host` or `servers[]`. Passthrough flows are detected from
+  streamed `*/*` responses, and the rate limiter is inferred from `429` responses. Secrets are never restored:
+  plugin/middleware configs and TLS certificate paths are reported as warnings for manual re-adding. The generated
+  config is validated before output, so `import` never emits a config the gateway would reject.
 
 ## [0.7.0] - 2026-07-18
 
 ### Added
 
 - Support for the HTTP QUERY method.
-- `aastroctl openapi export` — generate an OpenAPI 3.1 (or 3.0) document from a gateway configuration. Response statuses are derived from the actual config: `206` only for best-effort multi-upstream flows, `409` only under `on_conflict: error`, `429` only when the rate limiter is enabled. Flows guarded by the builtin `auth` middleware get a `bearerAuth` security scheme and a `401` response. Passthrough flows are modeled as streamed `*/*` responses. Optional `--extensions` flag embeds `x-aastro` snapshots for future config round-trip (middleware configs and secrets are never serialized). Deterministic output, git-friendly. The config is loaded through the same pipeline as the gateway, so the command doubles as a config validator.
+- `aastroctl openapi export` — generate an OpenAPI 3.1 (or 3.0) document from a gateway configuration. Response statuses
+  are derived from the actual config: `206` only for best-effort multi-upstream flows, `409` only under
+  `on_conflict: error`, `429` only when the rate limiter is enabled. Flows guarded by the builtin `auth` middleware get
+  a `bearerAuth` security scheme and a `401` response. Passthrough flows are modeled as streamed `*/*` responses.
+  Optional `--extensions` flag embeds `x-aastro` snapshots for future config round-trip (middleware configs and secrets
+  are never serialized). Deterministic output, git-friendly. The config is loaded through the same pipeline as the
+  gateway, so the command doubles as a config validator.
 
 ### Changed
 
-- Client IP is now extracted only from trusted sources: `X-Forwarded-For` and `X-Real-IP` are honored only when the request comes from a `trusted_proxies` peer, with right-to-left XFF parsing. Prevents rate limiter bypass and client IP spoofing via forged headers.
+- Client IP is now extracted only from trusted sources: `X-Forwarded-For` and `X-Real-IP` are honored only when the
+  request comes from a `trusted_proxies` peer, with right-to-left XFF parsing. Prevents rate limiter bypass and client
+  IP spoofing via forged headers.
 
 ## [0.6.0] - 2026-07-05
 

@@ -30,6 +30,8 @@ const (
 	ClientErrUpstreamBodyTooLarge ClientError = "UPSTREAM_BODY_TOO_LARGE"
 	ClientErrUpstreamUnavailable  ClientError = "UPSTREAM_UNAVAILABLE"
 	ClientErrUpstreamError        ClientError = "UPSTREAM_ERROR"
+	ClientErrUpstreamClientError  ClientError = "UPSTREAM_CLIENT_ERROR"
+	ClientErrUpstreamRedirect     ClientError = "UPSTREAM_REDIRECT"
 	ClientErrUpstreamMalformed    ClientError = "UPSTREAM_MALFORMED"
 	ClientErrInternal             ClientError = "INTERNAL"
 	ClientErrAborted              ClientError = "ABORTED"
