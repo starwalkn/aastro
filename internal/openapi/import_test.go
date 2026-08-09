@@ -215,6 +215,7 @@ var _ = Describe("ToConfig", func() {
 				AllowedStatuses:     []int{200, 204},
 				RequireBody:         true,
 				MaxResponseBodySize: 1 << 20,
+				FollowRedirects:     true,
 				RetryConfig: aastro.RetryConfig{
 					MaxRetries:      3,
 					RetryOnStatuses: []int{500, 502, 503},
@@ -241,6 +242,7 @@ var _ = Describe("ToConfig", func() {
 			Expect(up.Policy.LoadBalancingConfig.Mode).To(Equal("least_conns"))
 			Expect(up.Policy.HeaderBlacklist).To(HaveExactElements("X-Internal-Token"))
 			Expect(up.Policy.MaxResponseBodySize).To(Equal(int64(1 << 20)))
+			Expect(up.Policy.FollowRedirects).To(BeTrue())
 			Expect(up.Transport.MaxIdleConns).To(Equal(100))
 			Expect(up.Transport.IdleConnTimeout).To(Equal(90 * time.Second))
 			Expect(up.TLS.Enabled).To(BeTrue())

@@ -148,6 +148,7 @@ type PolicyExtension struct {
 	AllowedStatuses     []int    `yaml:"allowed_statuses,omitempty"       json:"allowed_statuses,omitempty"`
 	RequireBody         bool     `yaml:"require_body,omitempty"           json:"require_body,omitempty"`
 	MaxResponseBodySize int64    `yaml:"max_response_body_size,omitempty" json:"max_response_body_size,omitempty"`
+	FollowRedirects     bool     `yaml:"follow_redirects,omitempty"       json:"follow_redirects,omitempty"`
 
 	Retry          *RetryExtension          `yaml:"retry,omitempty"           json:"retry,omitempty"`
 	CircuitBreaker *CircuitBreakerExtension `yaml:"circuit_breaker,omitempty" json:"circuit_breaker,omitempty"`

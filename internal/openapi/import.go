@@ -279,6 +279,7 @@ func reconstructPolicy(p *PolicyExtension, flowID, upstream string, warnings *[]
 		AllowedStatuses:     p.AllowedStatuses,
 		RequireBody:         p.RequireBody,
 		MaxResponseBodySize: p.MaxResponseBodySize,
+		FollowRedirects:     p.FollowRedirects,
 		LoadBalancingConfig: aastro.LoadBalancingConfig{Mode: p.LoadBalancing},
 	}
 

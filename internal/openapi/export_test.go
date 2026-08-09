@@ -219,6 +219,49 @@ var _ = Describe("FromConfig", func() {
 			Expect(doc.Paths["/a"].Post.RequestBody).NotTo(BeNil())
 			Expect(doc.Paths["/b"].Get.RequestBody).To(BeNil())
 		})
+
+		It("documents verbatim propagation for a single upstream with no allowed_statuses", func() {
+			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
+
+			responses := doc.Paths["/a"].Get.Responses
+			Expect(responses).To(HaveKey("default"))
+			Expect(responses["default"].Description).To(ContainSubstring("acts as a proxy"))
+		})
+
+		It("enumerates allowed statuses instead of default when the contract is closed", func() {
+			u := minimalUpstream("u")
+			u.Policy.AllowedStatuses = []int{200, 204, 404}
+
+			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", u)), Options{})
+
+			responses := doc.Paths["/a"].Get.Responses
+			Expect(responses).NotTo(HaveKey("default"))
+			Expect(responses).To(HaveKey("404"))
+			Expect(responses).To(HaveKey("204"))
+
+			// 204 cannot carry a body
+			Expect(responses["204"].Content).To(BeEmpty())
+			Expect(responses["404"].Content).To(HaveKey("application/json"))
+		})
+
+		It("describes the shared-status rule for multi-upstream flows", func() {
+			doc, _ := generate(
+				configWith(false, mergeFlow("/a", false, "", minimalUpstream("u1"), minimalUpstream("u2"))),
+				Options{},
+			)
+
+			Expect(doc.Paths["/a"].Get.Responses["default"].Description).To(ContainSubstring("every failing upstream"))
+		})
+
+		It("omits default when every upstream closes its status contract", func() {
+			u1, u2 := minimalUpstream("u1"), minimalUpstream("u2")
+			u1.Policy.AllowedStatuses = []int{200}
+			u2.Policy.AllowedStatuses = []int{200}
+
+			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", u1, u2)), Options{})
+
+			Expect(doc.Paths["/a"].Get.Responses).NotTo(HaveKey("default"))
+		})
 	})
 
 	Describe("auth middleware mapping", func() {
