@@ -7,7 +7,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.8.1] — 2026-08-09
+## [0.9.0] — 2026-08-09
 
 ### Added
 
