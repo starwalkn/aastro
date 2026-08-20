@@ -15,7 +15,7 @@ import (
 var _ = Describe("Router", func() {
 	Describe("ServeHTTP", func() {
 		Context("with a successful flow", func() {
-			It("aggregates upstream responses into an array", func() {
+			It("returns the aggregated array as the body, unwrapped", func() {
 				d := &mockScatter{
 					results: []upstreamResponse{
 						{status: http.StatusOK, body: []byte(`"A"`), err: nil},
@@ -39,17 +39,16 @@ var _ = Describe("Router", func() {
 				res := rec.Result()
 				defer res.Body.Close()
 				body, _ := io.ReadAll(res.Body)
-				resp := decodeJSONResponse(body)
 
 				Expect(res.StatusCode).To(Equal(http.StatusOK))
 				Expect(res.Header.Get("Content-Type")).To(ContainSubstring("application/json"))
-				Expect(resp.Errors).To(BeEmpty())
-				jsonEqual(`["A","B"]`, resp.Data)
+				Expect(res.Header.Values("X-Partial-Errors")).To(BeEmpty())
+				jsonEqual(`["A","B"]`, body)
 			})
 		})
 
 		Context("with a partial response", func() {
-			It("returns 206 and includes errors", func() {
+			It("returns 206, the successful data unwrapped, and failures on X-Partial-Errors", func() {
 				d := &mockScatter{
 					results: []upstreamResponse{
 						{status: http.StatusOK, body: []byte(`"A"`), err: nil},
@@ -76,16 +75,15 @@ var _ = Describe("Router", func() {
 				res := rec.Result()
 				defer res.Body.Close()
 				body, _ := io.ReadAll(res.Body)
-				resp := decodeJSONResponse(body)
 
 				Expect(res.StatusCode).To(Equal(http.StatusPartialContent))
-				Expect(resp.Errors).To(ConsistOf(ClientErrUpstreamUnavailable))
-				jsonEqual(`["A"]`, resp.Data)
+				Expect(res.Header.Values("X-Partial-Errors")).To(ConsistOf(ClientErrUpstreamUnavailable.String()))
+				jsonEqual(`["A"]`, body)
 			})
 		})
 
 		Context("with all upstreams failing", func() {
-			It("returns 502", func() {
+			It("returns 502 as a Problem Details document", func() {
 				d := &mockScatter{
 					results: []upstreamResponse{
 						{status: http.StatusOK, body: []byte(`"A"`), err: nil},
@@ -112,16 +110,18 @@ var _ = Describe("Router", func() {
 				res := rec.Result()
 				defer res.Body.Close()
 				body, _ := io.ReadAll(res.Body)
-				resp := decodeJSONResponse(body)
+				problem := decodeProblem(body)
 
 				Expect(res.StatusCode).To(Equal(http.StatusBadGateway))
-				Expect(resp.Data).To(BeNil())
-				Expect(resp.Errors).To(ConsistOf(ClientErrUpstreamUnavailable))
+				Expect(res.Header.Get("Content-Type")).To(ContainSubstring("application/problem+json"))
+				Expect(problem.Status).To(Equal(http.StatusBadGateway))
+				Expect(problem.Type).To(Equal("about:blank"))
+				Expect(problem.Errors).To(ConsistOf(ClientErrUpstreamUnavailable))
 			})
 		})
 
 		Context("with multiple distinct upstream errors", func() {
-			It("returns all errors and 502", func() {
+			It("lists every distinct error in the Problem Details Errors extension", func() {
 				d := &mockScatter{
 					results: []upstreamResponse{
 						{err: &upstreamError{kind: "unknown_error_kind", err: errors.New("unknown")}},
@@ -145,10 +145,10 @@ var _ = Describe("Router", func() {
 				res := rec.Result()
 				defer res.Body.Close()
 				body, _ := io.ReadAll(res.Body)
-				resp := decodeJSONResponse(body)
+				problem := decodeProblem(body)
 
 				Expect(res.StatusCode).To(Equal(http.StatusBadGateway))
-				Expect(resp.Errors).To(HaveLen(2))
+				Expect(problem.Errors).To(HaveLen(2))
 			})
 		})
 
@@ -251,7 +251,7 @@ var _ = Describe("Router", func() {
 				Expect(string(body)).To(Equal("<html>not found</html>"))
 			})
 
-			It("reports a gateway-side failure through the JSON error envelope", func() {
+			It("reports a gateway-side failure as a Problem Details response", func() {
 				d := &mockScatter{
 					results: []upstreamResponse{
 						{err: &upstreamError{kind: upstreamTimeout, err: errors.New("upstream timeout")}},
@@ -271,11 +271,13 @@ var _ = Describe("Router", func() {
 				res := rec.Result()
 				defer res.Body.Close()
 				body, _ := io.ReadAll(res.Body)
-				resp := decodeJSONResponse(body)
+				problem := decodeProblem(body)
 
 				Expect(res.StatusCode).To(Equal(http.StatusBadGateway))
-				Expect(res.Header.Get("Content-Type")).To(ContainSubstring("application/json"))
-				Expect(resp.Errors).To(ConsistOf(ClientErrUpstreamUnavailable))
+				Expect(res.Header.Get("Content-Type")).To(ContainSubstring("application/problem+json"))
+				Expect(problem.Status).To(Equal(http.StatusBadGateway))
+				Expect(problem.Type).To(Equal("about:blank"))
+				Expect(problem.Errors).To(ConsistOf(ClientErrUpstreamUnavailable))
 			})
 
 			It("returns 413 when the request body is too large", func() {

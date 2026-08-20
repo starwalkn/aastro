@@ -59,7 +59,9 @@ const (
 	defaultLeeway        = 5 * time.Second
 	authHeaderPartsCount = 2
 
-	defaultRealm     = "aastro"
+	// defaultRealm is deliberately generic: it lands in every 401's
+	// WWW-Authenticate header, so it must not name the gateway software.
+	defaultRealm     = "restricted"
 	bearerAuthScheme = "Bearer"
 
 	authErrorInvalidRequest = "invalid_request"
@@ -269,7 +271,6 @@ func (m *Middleware) newJWKSResolver(cfg jwtConfig) (keyResolver, error) {
 }
 
 func (m *Middleware) unauthorized(w http.ResponseWriter, c authChallenge) {
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set(
 		"WWW-Authenticate",
 		buildWWWAuthenticateHeader(m.realm, c.errorCode, c.errorDescription),

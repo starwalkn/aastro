@@ -11,15 +11,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Retries never fired for an upstream without an explicit `method:` — `retry_on_statuses`/timeout retries were
+- Retries never fired for an upstream without an explicit `method:` - `retry_on_statuses`/timeout retries were
   silently a no-op for the common case of relying on the flow's own method. `shouldRetry` judged idempotency against
   the raw (often empty) config value instead of the effective method used for the actual request. (The 0.9.0 entry
   below describing this as fixed was itself wrong: the switch cases changed, but the call site never did.)
-- The `TE` response header was never stripped despite being listed in the hop-by-hop set — the map key was the literal
+- The `TE` response header was never stripped despite being listed in the hop-by-hop set - the map key was the literal
   string `"TE"`, but `net/http` always stores and iterates response headers in `net/textproto` canonical form, which
   for `TE` is `Te` (no hyphen to separate words, so only the first letter is capitalized). The lookup silently missed
   every time, leaking the header to the client. Every other entry in that set was already canonical.
-- `policy.header_blacklist` entries were matched by exact string, not canonicalized — `header_blacklist: ["x-secret"]`
+- `policy.header_blacklist` entries were matched by exact string, not canonicalized - `header_blacklist: ["x-secret"]`
   silently never blocked a response header that `net/http` (correctly) stores as `X-Secret`. Same root cause as the
   `TE` fix above: HTTP header names are case-insensitive, but the code was comparing them as case-sensitive strings.
 
@@ -28,13 +28,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - **Breaking:** flow option `passthrough` renamed to `streaming` (config field, OpenAPI `x-aastro` extension, and
   `aastroctl openapi import --mode`). Existing configs and specs must rename `passthrough: true` to `streaming: true`
   before upgrading.
-- **Breaking:** a flow with exactly one upstream is no longer wrapped in the JSON response envelope
-  (`{"data": ..., "errors": ..., "meta": ...}`). Its upstream's status, headers, and body are now forwarded to the
-  client as-is - on success, and on a client error or redirect (2xx/3xx/4xx), including bodies that aren't valid
-  JSON, which previously got swallowed into an `UPSTREAM_CLIENT_ERROR`/`UPSTREAM_REDIRECT` envelope. Only a genuine
-  gateway-side failure (upstream unavailable, 5xx, timeout, policy violation) still returns the JSON error envelope.
-  Multi-upstream (aggregating) flows are unaffected. Single-upstream flows are now handled by their own dispatch
-  path, bypassing the scatter/aggregate machinery entirely - see `Router.dispatch`/`Router.buildProxyResponse`.
+- **Breaking:** a flow with exactly one upstream is no longer wrapped in the JSON response envelope. Its upstream's
+  status, headers, and body are now forwarded to the client as-is - on success, and on a client error or redirect
+  (2xx/3xx/4xx), including bodies that aren't valid JSON, which previously got swallowed into an
+  `UPSTREAM_CLIENT_ERROR`/`UPSTREAM_REDIRECT` envelope. Only a genuine gateway-side failure (upstream unavailable,
+  5xx, timeout, policy violation) still returns a gateway-authored error body - see the envelope removal entry
+  below for its current shape, which by the end of this release also covers multi-upstream flows. Single-upstream
+  flows are now handled by their own dispatch path, bypassing the scatter/aggregate machinery entirely - see
+  `Router.dispatch`/`Router.buildProxyResponse`.
 - `aggregation` is no longer required for a single-upstream flow, since it's never read for one - only a flow with
   more than one upstream must declare it (config validation enforces this in place of the old struct-tag check).
 - `aastroctl openapi import --mode envelope` renamed to `--mode proxy`, matching the response shape above; scaffolded
@@ -43,11 +44,29 @@ Versions follow [Semantic Versioning](https://semver.org/).
   circuit breaker signal, policy applicability, client error code) were consolidated into one table
   (`kindTable` in `upstream_error.go`), checked exhaustive at startup. Not user-facing, but worth knowing if you're
   extending upstream error handling: add the new kind's row there rather than hunting down every switch.
-- **Breaking:** the JSON error envelope no longer has a `meta` field (`ResponseMeta`, `request_id`/`partial`) - it is
-  now just `{"data": ..., "errors": ...}`. The request identifier was already duplicated in the `X-Request-ID`
-  response header, and `partial` duplicated the `206` status code; both were a second, driftable source of the same
-  fact instead of the actual RFC 9110 mechanism (a correlation ID is a header concern, not a body field). Read the
-  request ID from `X-Request-ID` and partial success from the status code instead of `meta`.
+- **Breaking:** the `{"data": ..., "errors": ..., "meta": ...}` envelope is gone entirely, including for
+  multi-upstream (aggregating) flows - a client no longer unwraps a gateway-specific shape to get at the payload:
+  - A full or partial (`206`, bestEffort) success returns the aggregated data itself as the body - exactly the
+    `merge`/`array`/`namespace` result, nothing wrapping it. Which upstreams failed on a partial success moves to
+    the `X-Partial-Errors` response header (one value per failure, e.g. `UPSTREAM_UNAVAILABLE`) instead of an
+    `errors` body field.
+  - A response with no data at all - every upstream failed, or the request was rejected before reaching one
+    (rate limit, payload too large, plugin failure, single-upstream gateway failure) - is now an
+    [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details document (`application/problem+json`):
+    `{"type": "about:blank", "title", "status", "detail"?, "errors": [...]}`. `type` is always the literal
+    `"about:blank"` - RFC 9457's own placeholder for "no further-specific type" - never a real URI, deliberately:
+    a dereferencable type link is reconnaissance, since it names the gateway software fronting the request and
+    invites probing for what that implies about the backend. `errors` is the machine-readable discriminator instead
+    (always present, one entry per distinct underlying `ClientError` - more than one only for a multi-upstream
+    failure with several different causes); `title` is a human summary of the highest-priority one and may change
+    wording over time. `ClientResponse`/`ResponseMeta` are removed from the Go API; `WriteError` and the
+    OpenAPI-generated schemas both moved to `ProblemDetails`.
+  - Request correlation is unaffected by this - it was already carried solely by the `X-Request-ID` response
+    header, never duplicated into a body field.
+- **Breaking / security fix:** `builtin/middlewares/auth`'s default realm - sent in the `WWW-Authenticate` header on
+  every `401` the gateway itself returns - changed from `"aastro"` to `"restricted"`. Scope note: this is about the
+  gateway's own runtime response to a client. OpenAPI export output and anything that only affects tracing/metrics
+  (e.g. `gateway.service.name`) are a separate concern, owned by whoever runs and publishes them - not touched here.
 
 ## [0.9.0] — 2026-08-09
 

@@ -44,7 +44,7 @@ const (
 
 	maxBodySizeNote = "Request bodies larger than 5 MiB are rejected with 413."
 
-	schemaClientResponse = "#/components/schemas/ClientResponse"
+	schemaProblemDetails = "#/components/schemas/ProblemDetails"
 
 	securitySchemeBearer = "bearerAuth"
 
@@ -84,7 +84,7 @@ func FromConfig(cfg aastro.Config, opts Options) (*Document, []Warning, error) {
 	rateLimited := cfg.Gateway.Routing.RateLimiter.Enabled
 	tags := make(map[string]struct{})
 
-	needEnvelope := len(cfg.Gateway.Routing.Flows) > 0
+	needProblemSchemas := len(cfg.Gateway.Routing.Flows) > 0
 
 	var needAuthScheme bool
 
@@ -116,11 +116,11 @@ func FromConfig(cfg aastro.Config, opts Options) (*Document, []Warning, error) {
 	}
 	sort.Slice(doc.Tags, func(i, j int) bool { return doc.Tags[i].Name < doc.Tags[j].Name })
 
-	if needEnvelope || needAuthScheme {
+	if needProblemSchemas || needAuthScheme {
 		doc.Components = &Components{}
 
-		if needEnvelope {
-			doc.Components.Schemas = envelopeSchemas()
+		if needProblemSchemas {
+			doc.Components.Schemas = problemSchemas()
 		}
 
 		if needAuthScheme {
@@ -227,7 +227,7 @@ func buildOperation(f aastro.FlowConfig, auth *aastro.MiddlewareConfig, rateLimi
 				"Only a gateway-side failure — the upstream is unavailable, returns a server error, or fails "+
 				"gateway policy — is reported through the JSON error envelope instead.")
 	default:
-		op.Responses = envelopeResponses(f, rateLimited)
+		op.Responses = aggregateResponses(f, rateLimited)
 	}
 
 	if auth != nil {
@@ -388,35 +388,50 @@ func hasRequestBody(method string) bool {
 	}
 }
 
-func envelopeResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Response {
+// aggregateResponses is used for a flow with more than one upstream. Success
+// and partial success (206, bestEffort) return the aggregated data itself -
+// its shape depends on the flow's upstreams and aggregation strategy, so,
+// like proxyResponses's 200, it is undocumented content rather than a
+// schema ref. Only a response with no data at all (every upstream failed)
+// uses the Problem Details schema.
+func aggregateResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Response {
 	rs := map[string]*Response{
-		"200": envelopeResponse("Successful response."),
-		"413": envelopeResponse("Request body exceeds the gateway limit."),
-		"502": envelopeResponse("Upstream error, unavailable, or malformed response."),
-		"500": envelopeResponse("Internal gateway error."),
+		"200": {
+			Description: "Aggregated upstream data (`merge`/`array`/`namespace`), with no gateway wrapper.",
+			Headers:     stdHeaders(),
+			Content:     map[string]MediaType{"application/json": {}},
+		},
+		"413": problemResponse("Request body exceeds the gateway limit."),
+		"502": problemResponse("Every upstream failed, was unavailable, or returned a malformed response."),
+		"500": problemResponse("Internal gateway error."),
 	}
 
 	if f.Aggregation != nil {
 		if f.Aggregation.BestEffort && len(f.Upstreams) > 1 {
-			rs["206"] = envelopeResponse("Partial success: some upstreams failed (best-effort aggregation). `errors` lists the failures.")
+			rs["206"] = &Response{
+				Description: "Partial success: some upstreams failed (best-effort aggregation). The body is the data from the " +
+					"upstreams that succeeded, in the same shape as 200; `X-Partial-Errors` carries one value per failure.",
+				Headers: partialHeaders(),
+				Content: map[string]MediaType{"application/json": {}},
+			}
 		}
 
 		if f.Aggregation.Strategy == "merge" &&
 			f.Aggregation.OnConflict != nil &&
 			f.Aggregation.OnConflict.Policy == "error" {
-			rs["409"] = envelopeResponse("Merge conflict: upstreams returned different values for the same field (`on_conflict: error`).")
+			rs["409"] = problemResponse("Merge conflict: upstreams returned different values for the same field (`on_conflict: error`).")
 		}
 	}
 
 	if rateLimited {
-		rs["429"] = envelopeResponse("Rate limit exceeded.")
+		rs["429"] = problemResponse("Rate limit exceeded.")
 	}
 
 	rs["default"] = &Response{
 		Description: propagationNote(),
 		Headers:     stdHeaders(),
 		Content: map[string]MediaType{
-			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
+			"application/problem+json": {Schema: &Schema{Ref: schemaProblemDetails}},
 		},
 	}
 
@@ -425,9 +440,9 @@ func envelopeResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Respon
 
 // proxyResponses is used for a flow with exactly one upstream: it is not
 // aggregated (see Router.dispatch), so its answer is forwarded to the client
-// as-is rather than wrapped in the JSON envelope. The 200 entry is
-// necessarily opaque — the gateway has no static knowledge of the upstream's
-// schema, only that *something* comes back unmodified.
+// as-is rather than wrapped in a gateway shape. The 200 entry is necessarily
+// opaque — the gateway has no static knowledge of the upstream's schema,
+// only that *something* comes back unmodified.
 func proxyResponses(rateLimited bool) map[string]*Response {
 	rs := map[string]*Response{
 		"200": {
@@ -436,13 +451,13 @@ func proxyResponses(rateLimited bool) map[string]*Response {
 			Headers: stdHeaders(),
 			Content: map[string]MediaType{"*/*": {}},
 		},
-		"413": envelopeResponse("Request body exceeds the gateway limit."),
-		"502": envelopeResponse("Upstream unavailable, returned a server error, or failed gateway policy validation."),
-		"500": envelopeResponse("Internal gateway error."),
+		"413": problemResponse("Request body exceeds the gateway limit."),
+		"502": problemResponse("Upstream unavailable, returned a server error, or failed gateway policy validation."),
+		"500": problemResponse("Internal gateway error."),
 	}
 
 	if rateLimited {
-		rs["429"] = envelopeResponse("Rate limit exceeded.")
+		rs["429"] = problemResponse("Rate limit exceeded.")
 	}
 
 	return rs
@@ -455,23 +470,25 @@ func streamingResponses(rateLimited bool) map[string]*Response {
 			Headers:     stdHeaders(),
 			Content:     map[string]MediaType{"*/*": {}},
 		},
-		"502": envelopeResponse("Upstream unavailable before the response started streaming."),
-		"500": envelopeResponse("Internal gateway error."),
+		"502": problemResponse("Upstream unavailable before the response started streaming."),
+		"500": problemResponse("Internal gateway error."),
 	}
 
 	if rateLimited {
-		rs["429"] = envelopeResponse("Rate limit exceeded.")
+		rs["429"] = problemResponse("Rate limit exceeded.")
 	}
 
 	return rs
 }
 
-func envelopeResponse(desc string) *Response {
+// problemResponse describes a response that carries no upstream data at all -
+// an RFC 9457 Problem Details document (application/problem+json).
+func problemResponse(desc string) *Response {
 	return &Response{
 		Description: desc,
 		Headers:     stdHeaders(),
 		Content: map[string]MediaType{
-			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
+			"application/problem+json": {Schema: &Schema{Ref: schemaProblemDetails}},
 		},
 	}
 }
@@ -489,18 +506,47 @@ func stdHeaders() map[string]*Header {
 	}
 }
 
-func envelopeSchemas() map[string]*Schema {
+// partialHeaders is stdHeaders plus X-Partial-Errors, which only a 206
+// response carries.
+func partialHeaders() map[string]*Header {
+	h := stdHeaders()
+
+	h["X-Partial-Errors"] = &Header{
+		Description: "One value per failed upstream (a ClientError code, see the ClientError schema). Repeated when more than one upstream failed.",
+		Schema:      &Schema{Type: "string"},
+	}
+
+	return h
+}
+
+func problemSchemas() map[string]*Schema {
 	return map[string]*Schema{
-		"ClientResponse": {
-			Type:        "object",
-			Description: "Gateway response envelope.",
+		"ProblemDetails": {
+			Type: "object",
+			Description: "RFC 9457 Problem Details (application/problem+json). Returned only when there is no upstream " +
+				"data to report: every upstream failed, or the request was rejected before reaching one.",
 			Properties: map[string]*Schema{
-				"data": {
-					Type:        "object",
-					Description: "Aggregated upstream payload. Shape depends on the flow's upstreams and aggregation strategy.",
+				"type": {
+					Type: "string",
+					Description: "Always \"about:blank\" (RFC 9457 §4.2's own default). Deliberately never a real " +
+						"URI - see `errors` for the machine-readable cause instead.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Short, human-readable summary of the highest-priority entry in `errors`.",
+				},
+				"status": {
+					Type:        "integer",
+					Description: "HTTP status code, repeated here per RFC 9457.",
+				},
+				"detail": {
+					Type:        "string",
+					Description: "Occurrence-specific explanation, when there is one.",
 				},
 				"errors": {
-					Type:  "array",
+					Type: "array",
+					Description: "Every distinct ClientError behind this response - always at least one. More than " +
+						"one only for a multi-upstream failure where several upstreams failed differently.",
 					Items: &Schema{Ref: "#/components/schemas/ClientError"},
 				},
 			},
@@ -562,7 +608,7 @@ func unauthorizedResponse() *Response {
 			},
 		},
 		Content: map[string]MediaType{
-			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
+			"application/problem+json": {Schema: &Schema{Ref: schemaProblemDetails}},
 		},
 	}
 }
@@ -660,7 +706,7 @@ func transportExtension(t aastro.TransportConfig) *TransportExtension {
 	}
 }
 
-// propagationNote documents envelopeResponses's "default" entry, which is
+// propagationNote documents aggregateResponses's "default" entry, which is
 // only reached for a multi-upstream flow — a single-upstream flow is
 // documented by proxyResponses instead and never calls this.
 func propagationNote() string {

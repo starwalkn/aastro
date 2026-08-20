@@ -373,11 +373,11 @@ func jsonEqual(expected string, actual []byte) {
 	Expect(a).To(Equal(e))
 }
 
-func decodeJSONResponse(body []byte) ClientResponse {
+func decodeProblem(body []byte) ProblemDetails {
 	GinkgoHelper()
-	var resp ClientResponse
-	Expect(json.Unmarshal(body, &resp)).To(Succeed())
-	return resp
+	var problem ProblemDetails
+	Expect(json.Unmarshal(body, &problem)).To(Succeed())
+	return problem
 }
 
 func decodeJSONInto(data []byte, dst any) error {

@@ -91,11 +91,14 @@ type Router struct {
 //  7. Response writing - status, headers, and body sent to the client.
 //
 // A single-upstream flow forwards the upstream's own status/body verbatim on
-// success or on a client error/redirect; every other case - including all
-// multi-upstream responses - uses the JSON error envelope (data/errors).
-// Status codes: 200 on full success, 206 on partial (bestEffort, multi-upstream
-// only), 502/500 on failure. Every response carries an X-Request-ID header -
-// that header, not a body field, is the response's only request identifier.
+// success or on a client error/redirect. A multi-upstream flow's success or
+// partial-success (206, bestEffort) body is the aggregated data itself, with
+// no gateway-added wrapper - a client never has to unwrap a response to get
+// at the payload. Only a response with no data at all (a hard failure with
+// nothing to aggregate, a rejected request that never reached an upstream)
+// is a body, and that body is an RFC 9457 Problem Details document
+// (application/problem+json), not a bespoke shape. Status codes: 200 on full
+// success, 206 on partial, 502/500 on failure.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.metrics.IncRequestsInFlight()
 	defer r.metrics.DecRequestsInFlight()
@@ -326,8 +329,8 @@ func (r *Router) dispatch(w http.ResponseWriter, req *http.Request, f *flow, log
 // A success or a client-error/redirect answer from the upstream (its status,
 // headers, and body) is forwarded to the client as-is. Any other failure -
 // the upstream never answered, answered with a 5xx, or failed gateway
-// policy - has no upstream body worth forwarding and is reported through
-// the JSON error envelope instead.
+// policy - has no upstream body worth forwarding and is reported as an
+// RFC 9457 Problem Details document instead.
 func (r *Router) buildProxyResponse(ctx context.Context, resp upstreamResponse, log *zap.Logger) *http.Response {
 	requestID := requestIDFromContext(ctx)
 	fingerprint := fingerprintFromContext(ctx)
@@ -362,16 +365,14 @@ func (r *Router) buildProxyResponse(ctx context.Context, resp upstreamResponse, 
 	clientErr := mapUpstreamError(resp.err)
 	status := r.statusFromErrors([]ClientError{clientErr}, false)
 
-	log.Warn("upstream error, returning gateway error envelope",
+	log.Warn("upstream error, returning a problem details response",
 		zap.String("upstream_error", resp.err.Unwrap().Error()),
 		zap.String("client_error", clientErr.String()),
 	)
 
-	headers.Set("Content-Type", "application/json; charset=utf-8")
+	headers.Set("Content-Type", "application/problem+json")
 
-	body := mustMarshal(ClientResponse{
-		Errors: []ClientError{clientErr},
-	})
+	body := mustMarshal(problemForErrors([]ClientError{clientErr}, status))
 
 	return &http.Response{
 		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
@@ -395,7 +396,6 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 
 	headers.Set("X-Request-ID", requestID)
 	headers.Set("X-Request-Fingerprint", fingerprint)
-	headers.Set("Content-Type", "application/json; charset=utf-8")
 
 	log.Debug("aggregation finished",
 		zap.String("strategy", f.aggregation.strategy.String()),
@@ -405,7 +405,7 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 	)
 
 	status := r.resolveStatus(aggregated)
-	body := r.buildResponseBody(aggregated, status)
+	body := r.buildResponseBody(headers, aggregated, status)
 
 	return &http.Response{
 		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
@@ -416,32 +416,34 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 	}
 }
 
-// buildResponseBody encodes the envelope body. Partial success is signaled
-// solely by the HTTP status (206, set by resolveStatus) - it is not repeated
-// as a body field.
-func (r *Router) buildResponseBody(aggregated aggregatedResponse, status int) []byte {
+// buildResponseBody sets the outgoing Content-Type on headers and returns
+// the body. A full failure (no upstream produced anything) is reported as
+// an RFC 9457 Problem Details document; a full or partial success returns
+// the aggregated data verbatim, with the same shape either way - which
+// upstreams failed on a partial success goes on the X-Partial-Errors
+// header (one value per failure) instead of a body field, so a client never
+// has to branch on response shape depending on whether every upstream
+// happened to succeed.
+func (r *Router) buildResponseBody(headers http.Header, aggregated aggregatedResponse, status int) []byte {
 	// RFC 9110
 	if status == http.StatusNoContent || status == http.StatusNotModified {
 		return nil
 	}
 
-	switch {
-	case len(aggregated.errors) > 0 && !aggregated.partial:
-		return mustMarshal(ClientResponse{
-			Data:   nil,
-			Errors: aggregated.errors,
-		})
-	case aggregated.partial:
-		return mustMarshal(ClientResponse{
-			Data:   aggregated.data,
-			Errors: aggregated.errors,
-		})
-	default:
-		return mustMarshal(ClientResponse{
-			Data:   aggregated.data,
-			Errors: nil,
-		})
+	if len(aggregated.errors) > 0 && !aggregated.partial {
+		headers.Set("Content-Type", "application/problem+json")
+		return mustMarshal(problemForErrors(aggregated.errors, status))
 	}
+
+	headers.Set("Content-Type", "application/json; charset=utf-8")
+
+	if aggregated.partial {
+		for _, e := range aggregated.errors {
+			headers.Add("X-Partial-Errors", e.String())
+		}
+	}
+
+	return aggregated.data
 }
 
 func (r *Router) copyResponse(w http.ResponseWriter, resp *http.Response) {
@@ -485,6 +487,16 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 		return http.StatusOK
 	}
 
+	return statusForError(selectPrimaryError(errors))
+}
+
+// ── Package-level helpers ─────────────────────────────────────────────────────
+
+// selectPrimaryError picks the single most specific error out of a set,
+// by priority (see errorPriority) - used both for the HTTP status (below)
+// and for a multi-error Problem Details document's Type/Title (problemForErrors),
+// so the two always agree on which failure is "the" failure.
+func selectPrimaryError(errors []ClientError) ClientError {
 	var selected ClientError
 
 	maxPriority := -1
@@ -496,7 +508,11 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 		}
 	}
 
-	switch selected {
+	return selected
+}
+
+func statusForError(e ClientError) int {
+	switch e {
 	case ClientErrRateLimitExceeded:
 		return http.StatusTooManyRequests
 	case ClientErrPayloadTooLarge:
@@ -520,12 +536,24 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 	return http.StatusInternalServerError
 }
 
-// ── Package-level helpers ─────────────────────────────────────────────────────
+// problemForErrors builds the RFC 9457 body for a response with one or more
+// failing causes. Title summarizes the single highest-priority error (Type
+// is always "about:blank", see ProblemDetails); Errors always carries the
+// full set, even when it's only the one - it's the sole machine-readable
+// discriminator now that Type doesn't vary.
+func problemForErrors(errors []ClientError, status int) ProblemDetails {
+	return ProblemDetails{
+		Type:   problemTypeBlank,
+		Title:  selectPrimaryError(errors).problemTitle(),
+		Status: status,
+		Errors: errors,
+	}
+}
 
 func mustMarshal(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return []byte(`{"errors":[{"code":"INTERNAL"}]}`)
+		return []byte(`{"type":"about:blank","title":"Internal gateway error","status":500,"errors":["INTERNAL"]}`)
 	}
 
 	return b

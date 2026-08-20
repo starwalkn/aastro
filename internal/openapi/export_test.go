@@ -148,7 +148,9 @@ var _ = Describe("FromConfig", func() {
 			Expect(responses).To(HaveKey("413"))
 			Expect(responses).To(HaveKey("500"))
 			Expect(responses).To(HaveKey("502"))
-			Expect(responses["200"].Content["application/json"].Schema.Ref).To(Equal(schemaClientResponse))
+			Expect(responses["200"].Content).To(HaveKey("application/json"))
+			Expect(responses["200"].Content["application/json"].Schema).To(BeNil())
+			Expect(responses["502"].Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
 		})
 
 		It("documents a single-upstream flow as an opaque proxy, not the envelope", func() {
@@ -163,7 +165,7 @@ var _ = Describe("FromConfig", func() {
 
 			Expect(responses["200"].Content).To(HaveKey("*/*"))
 			Expect(responses["200"].Content["*/*"].Schema).To(BeNil())
-			Expect(responses["502"].Content["application/json"].Schema.Ref).To(Equal(schemaClientResponse))
+			Expect(responses["502"].Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
 		})
 
 		DescribeTable("206 appears only for best-effort multi-upstream flows",
@@ -185,6 +187,15 @@ var _ = Describe("FromConfig", func() {
 			Entry("best-effort with one upstream", true, 1, false),
 			Entry("strict with two upstreams", false, 2, false),
 		)
+
+		It("documents X-Partial-Errors only on the 206 response", func() {
+			doc, _ := generate(configWith(false, mergeFlow("/a", true, "", minimalUpstream("u1"), minimalUpstream("u2"))), Options{})
+
+			responses := doc.Paths["/a"].Get.Responses
+			Expect(responses["206"].Headers).To(HaveKey("X-Partial-Errors"))
+			Expect(responses["206"].Content["application/json"].Schema).To(BeNil())
+			Expect(responses["200"].Headers).NotTo(HaveKey("X-Partial-Errors"))
+		})
 
 		DescribeTable("409 appears only under on_conflict: error",
 			func(policy string, want bool) {
@@ -282,7 +293,7 @@ var _ = Describe("FromConfig", func() {
 			resp := doc.Paths["/secured"].Get.Responses["401"]
 			Expect(resp.Headers).To(HaveLen(1))
 			Expect(resp.Headers).To(HaveKey("WWW-Authenticate"))
-			Expect(resp.Content["application/json"].Schema.Ref).To(Equal(schemaClientResponse))
+			Expect(resp.Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
 		})
 
 		It("omits the security scheme when no flow uses auth", func() {
@@ -437,12 +448,13 @@ var _ = Describe("FromConfig", func() {
 	})
 
 	Describe("components", func() {
-		It("emits envelope schemas even for streaming-only configs", func() {
+		It("emits problem detail schemas even for streaming-only configs", func() {
 			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{})
 
 			Expect(doc.Components).NotTo(BeNil())
-			Expect(doc.Components.Schemas).To(HaveKey("ClientResponse"))
+			Expect(doc.Components.Schemas).To(HaveKey("ProblemDetails"))
 			Expect(doc.Components.Schemas).To(HaveKey("ClientError"))
+			Expect(doc.Components.Schemas).NotTo(HaveKey("ClientResponse"))
 		})
 	})
 })

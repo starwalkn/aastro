@@ -60,7 +60,7 @@ var _ = Describe("Auth", func() {
 				h.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
-				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(`Bearer realm="aastro"`))
+				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(`Bearer realm="restricted"`))
 			})
 		})
 
@@ -79,7 +79,7 @@ var _ = Describe("Auth", func() {
 
 				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
 				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
-					`Bearer realm="aastro", error="invalid_token", error_description="invalid or expired token"`,
+					`Bearer realm="restricted", error="invalid_token", error_description="invalid or expired token"`,
 				))
 			})
 		})
@@ -102,7 +102,7 @@ var _ = Describe("Auth", func() {
 
 				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
 				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
-					`Bearer realm="aastro", error="invalid_token", error_description="invalid or expired token"`,
+					`Bearer realm="restricted", error="invalid_token", error_description="invalid or expired token"`,
 				))
 			})
 		})
@@ -150,24 +150,24 @@ var _ = Describe("Auth", func() {
 
 				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
 				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
-					`Bearer realm="aastro", error="invalid_request", error_description="invalid authorization header"`,
+					`Bearer realm="restricted", error="invalid_request", error_description="invalid authorization header"`,
 				))
 			})
 		})
 		Describe("buildWWWAuthenticateHeader", func() {
 			It("builds a realm-only Bearer challenge", func() {
-				Expect(buildWWWAuthenticateHeader("aastro", "", "")).To(Equal(`Bearer realm="aastro"`))
+				Expect(buildWWWAuthenticateHeader("restricted", "", "")).To(Equal(`Bearer realm="restricted"`))
 			})
 
 			It("builds an invalid_token Bearer challenge", func() {
-				Expect(buildWWWAuthenticateHeader("aastro", authErrorInvalidToken, "invalid or expired token")).To(Equal(
-					`Bearer realm="aastro", error="invalid_token", error_description="invalid or expired token"`,
+				Expect(buildWWWAuthenticateHeader("custom-realm", authErrorInvalidToken, "invalid or expired token")).To(Equal(
+					`Bearer realm="custom-realm", error="invalid_token", error_description="invalid or expired token"`,
 				))
 			})
 
 			It("uses the default realm when realm is empty", func() {
 				Expect(buildWWWAuthenticateHeader("", authErrorInvalidRequest, "invalid authorization header")).To(Equal(
-					`Bearer realm="aastro", error="invalid_request", error_description="invalid authorization header"`,
+					`Bearer realm="restricted", error="invalid_request", error_description="invalid authorization header"`,
 				))
 			})
 		})

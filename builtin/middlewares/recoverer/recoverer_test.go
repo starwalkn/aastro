@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 
@@ -9,6 +10,8 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/starwalkn/aastro"
 )
 
 func newTestLogger(buf *bytes.Buffer) *zap.Logger {
@@ -40,9 +43,12 @@ var _ = Describe("Recoverer", func() {
 			h.ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			Expect(rec.Header().Get("Content-Type")).To(Equal("application/problem+json"))
 
-			body := rec.Body.String()
-			Expect(body).To(Equal(`{"errors":[{"code":"INTERNAL"}]}`))
+			var problem aastro.ProblemDetails
+			Expect(json.Unmarshal(rec.Body.Bytes(), &problem)).To(Succeed())
+			Expect(problem.Status).To(Equal(http.StatusInternalServerError))
+			Expect(problem.Title).To(Equal("Internal gateway error"))
 
 			logOutput := buf.String()
 			Expect(logOutput).To(ContainSubstring("panic recovered"))
@@ -66,9 +72,12 @@ var _ = Describe("Recoverer", func() {
 			h.ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			Expect(rec.Header().Get("Content-Type")).To(Equal("application/problem+json"))
 
-			body := rec.Body.String()
-			Expect(body).To(Equal(`{"errors":[{"code":"INTERNAL"}]}`))
+			var problem aastro.ProblemDetails
+			Expect(json.Unmarshal(rec.Body.Bytes(), &problem)).To(Succeed())
+			Expect(problem.Status).To(Equal(http.StatusInternalServerError))
+			Expect(problem.Title).To(Equal("Internal gateway error"))
 
 			logOutput := buf.String()
 			Expect(logOutput).To(ContainSubstring("panic recovered"))
