@@ -1,5 +1,5 @@
 # Stage 1: Build Go aastro binary
-FROM golang:1.26.3-bookworm AS builder
+FROM golang:1.26.7-bookworm AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN make build plugins \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} VERSION=${VERSION} COMMIT=${COMMIT} BUILD_DATE=${BUILD_DATE}
 
 # Stage 2: Final minimal image
-FROM chainguard/wolfi-base@sha256:2f7a5c164eafbdbe46fe1d91bd1ab4c8cb5c2bdbd10641c3d61bd39962384cdb AS runtime
+FROM chainguard/wolfi-base@sha256:bfcffaf1336b26a3fd33c8cb31a86a09324d2048420d7f49b983f323b0d33e8d AS runtime
 
 ARG VERSION
 ARG COMMIT
