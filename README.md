@@ -1,6 +1,6 @@
 # Aastro API Gateway
 
-A lightweight, modular, high-performance **API Gateway** for modern microservices —
+A lightweight, modular, high-performance **API Gateway** for modern microservices -
 parallel fan-out, declarative response aggregation, and `.so` plugins, configured in YAML.
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/starwalkn/aastro)](https://golang.org)
@@ -23,12 +23,12 @@ parallel fan-out, declarative response aggregation, and `.so` plugins, configure
 
 ## What it does
 
-One HTTP request in, several upstream calls out in parallel, one response back — merged,
+One HTTP request in, several upstream calls out in parallel, one response back - merged,
 namespaced, or arrayed, with per-upstream timeouts, retries, and circuit breakers. Everything
 is described in a YAML file; no code is required to add a route.
 
 ```yaml
-# aastro.yaml — a complete, minimal configuration
+# aastro.yaml - a complete, minimal configuration
 schema: v1
 
 gateway:
@@ -152,7 +152,7 @@ aastro -T -c aastro.yaml    # same, plus dump the effective config (defaults app
 - Path parameter extraction and forwarding; header and query allow-lists
 
 **Resilience**
-- Retries with an idempotency guard — non-idempotent methods are never replayed
+- Retries with an idempotency guard - non-idempotent methods are never replayed
 - Circuit breaker per upstream, with state exported as a Prometheus metric
 - Load balancing across hosts: `round_robin` or `least_conns`
 - Per-IP sliding-window rate limiting with trusted-proxy-aware client IP resolution
@@ -160,7 +160,7 @@ aastro -T -c aastro.yaml    # same, plus dump the effective config (defaults app
 
 **Security**
 - TLS and mutual TLS on the inbound data port and per upstream
-- Zero-downtime certificate hot-reload — cert-manager, Vault Agent, and SPIFFE/SPIRE ready
+- Zero-downtime certificate hot-reload - cert-manager, Vault Agent, and SPIFFE/SPIRE ready
 - Builtin JWT `auth` middleware
 - Admin port bound to localhost by default and never TLS-terminated
 
@@ -186,7 +186,7 @@ aastro -T -c aastro.yaml    # same, plus dump the effective config (defaults app
 ## `aastroctl`: OpenAPI in both directions
 
 The gateway config is the source of truth, and `aastroctl` turns it into a spec your clients
-can consume — or turns someone else's spec into a starting config.
+can consume - or turns someone else's spec into a starting config.
 
 ```bash
 # Generate an OpenAPI 3.1 document from the gateway configuration.
@@ -202,14 +202,14 @@ aastroctl openapi import -i openapi.yaml -o aastro.yaml --default-host https://b
 ```
 
 Export output is deterministic and diff-friendly, so the generated spec can live in git and be
-checked in CI. Import validates its own output — it never emits a config the gateway would
+checked in CI. Import validates its own output - it never emits a config the gateway would
 reject.
 
 ---
 
 ## Zero-downtime TLS certificate rotation
 
-Aastro reloads TLS material — on both the inbound data port and outbound upstream connections —
+Aastro reloads TLS material - on both the inbound data port and outbound upstream connections -
 without restarting the process, reloading the config, or dropping connections. It watches the
 certificate *directories* and atomically swaps the in-memory material when files change.
 
@@ -218,7 +218,7 @@ certificate *directories* and atomically swaps the in-memory material when files
   via symlink swap.
 - **Safe by construction.** New handshakes use the new certificate; in-flight connections finish
   on the old one. If a rotated certificate or CA bundle fails to parse, the previously loaded
-  material stays live — a bad rotation cannot take the listener down.
+  material stays live - a bad rotation cannot take the listener down.
 - **No configuration required.** Rotation works on your existing `cert_file`, `key_file`, and
   `ca_file` paths. There is no flag to enable.
 
@@ -264,7 +264,7 @@ plugins:
 ```
 
 Plugins must be compiled with the exact Go version and dependency set used for the gateway
-binary — Go's plugin ABI is unforgiving. See the
+binary - Go's plugin ABI is unforgiving. See the
 [plugin guide](https://starwalkn.github.io/aastro-docs/) and
 [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
@@ -273,7 +273,7 @@ binary — Go's plugin ABI is unforgiving. See the
 ## Roadmap
 
 Development is driven by demonstrated demand rather than a fixed feature list. Open a
-[discussion](https://github.com/starwalkn/aastro/discussions) or upvote an existing issue —
+[discussion](https://github.com/starwalkn/aastro/discussions) or upvote an existing issue -
 that is genuinely how the next milestone gets picked.
 
 ---
@@ -285,7 +285,7 @@ Bug reports, plugins, benchmarks, and documentation fixes are all welcome. Start
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0 - see [LICENSE](LICENSE).
 
 ---
 
