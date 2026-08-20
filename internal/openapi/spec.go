@@ -1,7 +1,7 @@
 // Package openapi generates OpenAPI 3.x documents from an aastro gateway
 // configuration. The package models only the subset of the specification
 // that the generator emits and has no dependencies outside the standard
-// library — serialization (YAML/JSON) is left to the caller (aastroctl).
+// library - serialization (YAML/JSON) is left to the caller (aastroctl).
 package openapi
 
 // Document is the root OpenAPI object.

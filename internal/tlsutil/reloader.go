@@ -107,12 +107,12 @@ func (r *Reloader) ClientConfig() *tls.Config {
 
 	switch {
 	case r.cfg.InsecureSkipVerify:
-		cfg.InsecureSkipVerify = true // #nosec G402 — явная воля конфига
+		cfg.InsecureSkipVerify = true // #nosec G402 - явная воля конфига
 
 	case r.cfg.CAFile != "":
 		// На клиенте нет per-handshake хука для RootCAs, поэтому гасим
 		// дефолтный верификатор и проверяем сами против текущего пула.
-		cfg.InsecureSkipVerify = true // #nosec G402 — проверка уехала в VerifyConnection
+		cfg.InsecureSkipVerify = true // #nosec G402 - проверка уехала в VerifyConnection
 		cfg.VerifyConnection = r.verifyConnection
 
 		// иначе: системные корни, статическая проверка (они per-process не ротируются)

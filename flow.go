@@ -8,7 +8,7 @@ type flow struct {
 	path   string
 	method string
 
-	// aggregation is only read when len(upstreams) > 1 — a single-upstream
+	// aggregation is only read when len(upstreams) > 1 - a single-upstream
 	// flow is proxied directly (Router.buildProxyResponse) and never
 	// aggregates, streaming or not. See Router.dispatch.
 	aggregation aggregation
@@ -19,7 +19,7 @@ type flow struct {
 
 	// streaming enables unbuffered proxy mode.
 	// When true: only one upstream is allowed, aggregation is skipped, and
-	// the response body is piped directly to the client (SSE-safe) — request
+	// the response body is piped directly to the client (SSE-safe) - request
 	// plugins still run, but response plugins do not (see handleStreaming).
 	streaming bool
 }

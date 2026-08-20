@@ -29,7 +29,7 @@ type defaultScatter struct {
 }
 
 // scatter reads the original request body once, then fans out to all upstreams concurrently.
-// Returns nil when the body is unreadable or exceeds maxBodySize —
+// Returns nil when the body is unreadable or exceeds maxBodySize -
 // the caller treats nil as a signal to respond with 413.
 func (d *defaultScatter) scatter(f *flow, original *http.Request) []upstreamResponse {
 	log := d.log.With(zap.String("request_id", requestIDFromContext(original.Context())))
@@ -69,10 +69,10 @@ func (d *defaultScatter) scatter(f *flow, original *http.Request) []upstreamResp
 }
 
 // call reads the request body once, then invokes the flow's single upstream
-// directly — no goroutine, no result slice. It backs single-upstream flows,
+// directly - no goroutine, no result slice. It backs single-upstream flows,
 // which bypass the aggregator entirely (see Router.buildProxyResponse).
 // Returns (response, true) on success, or (zero value, false) when the body
-// is unreadable or exceeds maxBodySize — the caller treats false as a signal
+// is unreadable or exceeds maxBodySize - the caller treats false as a signal
 // to respond with 413.
 func (d *defaultScatter) call(f *flow, original *http.Request) (upstreamResponse, bool) {
 	log := d.log.With(zap.String("request_id", requestIDFromContext(original.Context())))

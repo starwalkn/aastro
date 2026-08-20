@@ -182,7 +182,7 @@ var _ = Describe("Router", func() {
 			It("strips hop-by-hop headers, including TE, but keeps everything else", func() {
 				// Regression test: hopByHopHeaders keyed "TE" (not net/textproto's
 				// canonical "Te") never matched, since http.Header always stores
-				// and iterates canonical keys — the header leaked to the client.
+				// and iterates canonical keys - the header leaked to the client.
 				d := &mockScatter{
 					results: []upstreamResponse{
 						{

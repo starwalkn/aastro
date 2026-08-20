@@ -20,7 +20,7 @@ func minimalValidConfig(flows ...FlowConfig) Config {
 
 var _ = Describe("ValidateConfig", func() {
 	// Aggregation is only reached by the router when a flow has more than one
-	// upstream (see Router.dispatch) — a single-upstream flow is proxied
+	// upstream (see Router.dispatch) - a single-upstream flow is proxied
 	// directly, streaming or not, and never aggregates.
 	Describe("aggregation requirement", func() {
 		It("does not require aggregation for a single-upstream flow", func() {

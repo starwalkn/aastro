@@ -224,8 +224,8 @@ func buildOperation(f aastro.FlowConfig, auth *aastro.MiddlewareConfig, rateLimi
 		op.Responses = proxyResponses(rateLimited)
 		notes = append(notes,
 			"Proxy flow: the upstream's response (status, headers, body) is forwarded to the client as-is. "+
-				"Only a gateway-side failure — the upstream is unavailable, returns a server error, or fails "+
-				"gateway policy — is reported through the JSON error envelope instead.")
+				"Only a gateway-side failure - the upstream is unavailable, returns a server error, or fails "+
+				"gateway policy - is reported through the JSON error envelope instead.")
 	default:
 		op.Responses = aggregateResponses(f, rateLimited)
 	}
@@ -441,13 +441,13 @@ func aggregateResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Respo
 // proxyResponses is used for a flow with exactly one upstream: it is not
 // aggregated (see Router.dispatch), so its answer is forwarded to the client
 // as-is rather than wrapped in a gateway shape. The 200 entry is necessarily
-// opaque — the gateway has no static knowledge of the upstream's schema,
+// opaque - the gateway has no static knowledge of the upstream's schema,
 // only that *something* comes back unmodified.
 func proxyResponses(rateLimited bool) map[string]*Response {
 	rs := map[string]*Response{
 		"200": {
 			Description: "Upstream response forwarded as-is: status, headers, and body are exactly what the upstream returned. " +
-				"This also covers 3xx/4xx answers from the upstream — those are proxied verbatim too, not translated into gateway errors.",
+				"This also covers 3xx/4xx answers from the upstream - those are proxied verbatim too, not translated into gateway errors.",
 			Headers: stdHeaders(),
 			Content: map[string]MediaType{"*/*": {}},
 		},
@@ -707,7 +707,7 @@ func transportExtension(t aastro.TransportConfig) *TransportExtension {
 }
 
 // propagationNote documents aggregateResponses's "default" entry, which is
-// only reached for a multi-upstream flow — a single-upstream flow is
+// only reached for a multi-upstream flow - a single-upstream flow is
 // documented by proxyResponses instead and never calls this.
 func propagationNote() string {
 	return "Upstream status propagated verbatim. When every failing upstream returns the same " +

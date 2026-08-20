@@ -31,10 +31,10 @@ import (
 )
 
 // Keys must be net/textproto's canonical form (net/http always stores and
-// iterates response headers that way) — "TE" is the one entry here that
+// iterates response headers that way) - "TE" is the one entry here that
 // doesn't look canonical at a glance: textproto.CanonicalMIMEHeaderKey("TE")
-// is "Te" (no hyphen to separate words, so only the first letter is upper-
-// cased), not "TE". Written any other way, this lookup silently never
+// is "Te" (no hyphen to separate words, so only the first letter is upper-cased),
+// not "TE". Written any other way, this lookup silently never
 // matches and the header leaks to the client.
 var hopByHopHeaders = map[string]struct{}{
 	"Content-Length":      {},
@@ -234,7 +234,7 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 }
 
 // executePlugins runs all plugins of the given type in order.
-// On the first plugin error it writes a 500 to w and returns false —
+// On the first plugin error it writes a 500 to w and returns false -
 // the caller must treat false as "response already sent, stop processing".
 func (r *Router) executePlugins(pluginType sdk.PluginType, w http.ResponseWriter, actx sdk.Context, f *flow, log *zap.Logger) bool {
 	tracer := otel.Tracer(tracing.TracerName)

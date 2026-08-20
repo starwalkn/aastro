@@ -37,7 +37,7 @@ var (
 // respect bestEffort: partial results may be returned if allowed, otherwise
 // a single error response is returned.
 //
-// aggregate is only ever called for flows with more than one upstream — a
+// aggregate is only ever called for flows with more than one upstream - a
 // single-upstream flow is proxied directly by Router.buildProxyResponse and
 // never reaches the aggregator (see router.go).
 func (a *defaultAggregator) aggregate(upstreams []upstream, responses []upstreamResponse, agg aggregation, log *zap.Logger) aggregatedResponse {
@@ -86,7 +86,7 @@ func (a *defaultAggregator) merged(responses []upstreamResponse, agg aggregation
 
 // collectFields iterates responses and builds the merged field map applying the conflict policy.
 // Returns (fields, aggErrors, hasSuccessful, early) where early is non-nil when the caller
-// must return immediately — bestEffort=false failure or a conflictPolicyError conflict.
+// must return immediately - bestEffort=false failure or a conflictPolicyError conflict.
 func (a *defaultAggregator) collectFields(
 	responses []upstreamResponse,
 	agg aggregation,
@@ -158,7 +158,7 @@ func (a *defaultAggregator) applyConflictPolicy(fields map[string]field, k strin
 	case conflictPolicyOverwrite:
 		fields[k] = incoming
 	case conflictPolicyFirst:
-		// keep existing value — do nothing.
+		// keep existing value - do nothing.
 	case conflictPolicyError:
 		r := aggregatedResponse{errors: []ClientError{ClientErrValueConflict}}
 		return &r

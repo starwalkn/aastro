@@ -474,8 +474,7 @@ var _ = Describe("operationID", func() {
 var _ = Describe("authNote", func() {
 	DescribeTable("describes token requirements from non-secret fields",
 		func(cfg map[string]interface{}, want string) {
-			m := authMiddlewareConfig(cfg)
-			Expect(authNote(&m)).To(Equal(want))
+			Expect(authNote(new(authMiddlewareConfig(cfg)))).To(Equal(want))
 		},
 		Entry("issuer and audience", map[string]interface{}{"issuer": "https://idp", "audience": "api"},
 			"Requires a JWT issued by `https://idp` for audience `api`."),

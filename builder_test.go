@@ -285,7 +285,7 @@ var _ = Describe("builder", func() {
 		It("matches a blacklist entry regardless of its case", func() {
 			// Regression test: entries were used as map keys verbatim, but
 			// net/http always stores response headers in net/textproto
-			// canonical form — a config value like "x-secret" silently never
+			// canonical form - a config value like "x-secret" silently never
 			// matched the "X-Secret" key filterHeaders actually sees.
 			policy := buildUpstreamPolicy(PolicyConfig{
 				HeaderBlacklist: []string{"x-secret", "X-ALREADY-CANONICAL-ISH"},

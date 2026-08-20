@@ -112,7 +112,7 @@ type FlowConfig struct {
 	Method    string `yaml:"method" validate:"required,oneof=GET POST PUT PATCH DELETE HEAD OPTIONS QUERY"`
 	Streaming bool   `yaml:"streaming"`
 
-	// Aggregation is required only for flows with more than one upstream —
+	// Aggregation is required only for flows with more than one upstream -
 	// a single-upstream flow is proxied directly and never aggregates
 	// (enforced in validateFlows, since that depends on len(Upstreams)).
 	Aggregation *AggregationConfig `yaml:"aggregation"`

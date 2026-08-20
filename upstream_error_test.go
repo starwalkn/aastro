@@ -7,7 +7,7 @@ import (
 
 var _ = Describe("kindTable", func() {
 	// This is the property init() already enforces at startup (it panics on
-	// a missing entry) — asserting it here too gives a readable failure in
+	// a missing entry) - asserting it here too gives a readable failure in
 	// `go test` instead of only a panic trace, and documents the invariant
 	// next to the other kindProps-consumer tests below.
 	It("has an entry for every upstreamErrorKind constant", func() {

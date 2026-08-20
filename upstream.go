@@ -101,7 +101,7 @@ func (u *httpUpstream) callWithRetry(ctx context.Context, original *http.Request
 	// Same fallback as newRequest/proxy: an unset upstream method means
 	// "use the flow's own method". shouldRetry must judge idempotency
 	// against that effective method, not the raw (possibly empty) config
-	// value — otherwise retries never fire for the common case of an
+	// value - otherwise retries never fire for the common case of an
 	// upstream that doesn't override the method.
 	method := u.cfg.method
 	if method == "" {
@@ -197,7 +197,7 @@ func (u *httpUpstream) updateCircuitBreaker(resp *upstreamResponse, log *zap.Log
 	case breakerSuccess:
 		u.circuitBreaker.OnSuccess()
 	case breakerNoSignal:
-		// The request never reached the upstream — denied by the breaker itself,
+		// The request never reached the upstream - denied by the breaker itself,
 		// canceled by the client, or never built. Recording success here would
 		// let an open breaker reset itself with the very request it rejected.
 	}
@@ -231,7 +231,7 @@ func (u *httpUpstream) applyPolicy(ctx context.Context, resp *upstreamResponse) 
 		resp.err = &upstreamError{kind: upstreamPolicyViolation, err: combined}
 	case resp.err.kind == upstreamClientError, resp.err.kind == upstreamRedirect:
 		// A policy violation on top of an otherwise-propagatable client error/redirect
-		// means the response isn't worth forwarding — downgrade to a policy violation (502).
+		// means the response isn't worth forwarding - downgrade to a policy violation (502).
 		resp.err = &upstreamError{
 			kind: upstreamPolicyViolation,
 			err:  errors.Join(resp.err.err, combined),
@@ -323,7 +323,7 @@ func (u *httpUpstream) readBody(ctx context.Context, body io.ReadCloser, log *za
 
 		// Read one byte past the limit: LimitReader signals exhaustion with io.EOF,
 		// which ReadAll reports as success. The extra byte is the only way to tell
-		// "body ended" from "body was truncated" — see the length check below
+		// "body ended" from "body was truncated" - see the length check below
 		reader = io.LimitReader(reader, u.cfg.policy.maxResponseBodySize+1)
 	}
 

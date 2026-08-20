@@ -267,7 +267,7 @@ var _ = Describe("Scatter", func() {
 		It("still retries when the upstream has no explicit method (falls back to the request's)", func() {
 			// Regression test: shouldRetry must judge idempotency against the
 			// effective method (config method, falling back to the original
-			// request's), not the raw config value — an unset upstream method
+			// request's), not the raw config value - an unset upstream method
 			// used to make isIdempotent("") always false, silently disabling
 			// retries for the common case of not overriding the method.
 			var attempts atomic.Int32

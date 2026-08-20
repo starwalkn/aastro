@@ -59,7 +59,7 @@ const (
 // kindProps captures every fact about an upstreamErrorKind that the retry,
 // circuit breaker, policy, and response layers need. Previously each of
 // those layers re-derived these facts independently via its own switch
-// statement over upstreamErrorKind — four separate places to keep in sync
+// statement over upstreamErrorKind - four separate places to keep in sync
 // by hand (see CHANGELOG 0.9.0, where splitting UPSTREAM_CLIENT_ERROR from
 // UPSTREAM_REDIRECT meant touching several of them). This table is the
 // single source of truth instead; init() below panics at startup if a kind
@@ -109,7 +109,7 @@ var kindTable = map[upstreamErrorKind]kindProps{
 }
 
 // allUpstreamErrorKinds is used only to make kindTable's completeness
-// checkable — both at startup (init below) and from tests.
+// checkable - both at startup (init below) and from tests.
 var allUpstreamErrorKinds = []upstreamErrorKind{
 	upstreamTimeout, upstreamCanceled, upstreamConnection, upstreamRedirect,
 	upstreamClientError, upstreamBadStatus, upstreamReadError, upstreamBodyTooLarge,
@@ -126,7 +126,7 @@ func init() {
 
 // unknownKindProps is returned for a kind absent from kindTable. This can
 // only happen for a malformed *upstreamError built outside this package
-// (e.g. by a test double or a future caller) — every kind this package
+// (e.g. by a test double or a future caller) - every kind this package
 // itself produces is checked exhaustive by init() above. It mirrors what
 // mapUpstreamError used to fall back to before this table existed: treat it
 // as an internal error, and give the breaker/retry logic no signal to act on.

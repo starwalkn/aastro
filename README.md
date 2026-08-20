@@ -21,8 +21,8 @@ Built with simplicity, performance, and developer-friendly configuration in mind
 
 - 🚀 High-performance HTTP reverse proxy
 - 🔀 Request fan-out & response aggregation (merge, array, namespace)
-- 🔐 TLS & mutual TLS (mTLS) — on the inbound data port and per-upstream 
-- 🔄 Zero-downtime TLS certificate hot-reload — cert-manager / Vault / SPIFFE ready
+- 🔐 TLS & mutual TLS (mTLS) - on the inbound data port and per-upstream 
+- 🔄 Zero-downtime TLS certificate hot-reload - cert-manager / Vault / SPIFFE ready
 - 🧩 Dynamic `.so` plugin system (request & response phase)
 - 🔗 Path parameter extraction and forwarding
 - 🔁 Retry, circuit breaker & load balancing (round-robin, least-conns)
@@ -57,8 +57,8 @@ docker run \
 
 ## 🔄 Zero-downtime TLS certificate rotation
 
-Aastro reloads TLS certificates — on both the inbound data port and outbound upstream
-connections — without restarting the process, reloading config, or dropping connections.
+Aastro reloads TLS certificates - on both the inbound data port and outbound upstream
+connections - without restarting the process, reloading config, or dropping connections.
 It watches the certificate directories and atomically swaps the in-memory material when the
 files change on disk. No SIGHUP, no full-config reload, no downtime.
 
@@ -68,9 +68,9 @@ and SPIFFE/SPIRE. Directory-level watching handles both atomic file replacement 
 symlink swap rather than in-place writes.
 Safe by construction. New handshakes use the new certificate; in-flight connections
 finish on the old one. If a rotated certificate or CA bundle fails to parse, the previously
-loaded material stays live — a bad rotation can't take the listener down.
+loaded material stays live - a bad rotation can't take the listener down.
 No configuration required. Rotation works on your existing cert_file, key_file, and
-ca_file paths — there is no flag to enable.
+ca_file paths - there is no flag to enable.
 
 ```yaml
 gateway:
