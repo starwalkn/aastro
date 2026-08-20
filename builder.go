@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/textproto"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -224,16 +225,19 @@ func compileFlow(cfg FlowConfig, trustedProxies []*net.IPNet, metrics *metric.Me
 		return flow{}, fmt.Errorf("init upstreams: %w", err)
 	}
 
-	if cfg.Passthrough && len(upstreams) != 1 {
+	if cfg.Streaming && len(upstreams) != 1 {
 		return flow{}, fmt.Errorf(
-			"passthrough flow '%s' must have exactly one upstream, got %d",
+			"streaming flow '%s' must have exactly one upstream, got %d",
 			cfg.Path, len(upstreams),
 		)
 	}
 
+	// Aggregation only applies when the aggregator is actually reached: a flow
+	// with exactly one upstream is proxied directly (see Router.dispatch) and
+	// never sees it, streaming or not.
 	var aggregationParams aggregation
 
-	if !cfg.Passthrough {
+	if !cfg.Streaming && len(upstreams) > 1 {
 		var initErr error
 
 		aggregationParams, initErr = initAggregation(*cfg.Aggregation, upstreams)
@@ -259,7 +263,7 @@ func compileFlow(cfg FlowConfig, trustedProxies []*net.IPNet, metrics *metric.Me
 		upstreams:   upstreams,
 		plugins:     plugins,
 		middlewares: middlewares,
-		passthrough: cfg.Passthrough,
+		streaming:   cfg.Streaming,
 	}, nil
 }
 
@@ -427,14 +431,16 @@ func buildUpstreamState(hosts []string) upstreamState {
 }
 
 func buildUpstreamPolicy(cfg PolicyConfig) upstreamPolicy {
+	// Canonicalized so a config entry matches regardless of how it's cased:
+	// filterHeaders looks these up against http.Header, which net/http
+	// always stores in net/textproto canonical form.
 	headerBlacklist := make(map[string]struct{}, len(cfg.HeaderBlacklist))
 	for _, h := range cfg.HeaderBlacklist {
-		headerBlacklist[h] = struct{}{}
+		headerBlacklist[textproto.CanonicalMIMEHeaderKey(h)] = struct{}{}
 	}
 
 	return upstreamPolicy{
 		headerBlacklist:     headerBlacklist,
-		allowedStatuses:     cfg.AllowedStatuses,
 		requireBody:         cfg.RequireBody,
 		maxResponseBodySize: cfg.MaxResponseBodySize,
 		retry: retryPolicy{

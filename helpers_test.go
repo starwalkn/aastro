@@ -108,11 +108,24 @@ func (m *mockMiddleware) Handler(next http.Handler) http.Handler {
 // ── Scatter mock ──────────────────────────────────────────────────────────────
 
 type mockScatter struct {
-	results []upstreamResponse
+	results  []upstreamResponse
+	tooLarge bool
 }
 
 func (m *mockScatter) scatter(_ *flow, _ *http.Request) []upstreamResponse {
+	if m.tooLarge {
+		return nil
+	}
+
 	return m.results
+}
+
+func (m *mockScatter) call(_ *flow, _ *http.Request) (upstreamResponse, bool) {
+	if m.tooLarge {
+		return upstreamResponse{}, false
+	}
+
+	return m.results[0], true
 }
 
 // ── Builders ──────────────────────────────────────────────────────────────────
@@ -307,13 +320,13 @@ func newTestScatter() *defaultScatter {
 	}
 }
 
-func passthroughFlow(path string, u upstream, plugins ...sdk.Plugin) flow {
+func streamingFlow(path string, u upstream, plugins ...sdk.Plugin) flow {
 	return flow{
-		path:        path,
-		method:      http.MethodGet,
-		passthrough: true,
-		upstreams:   []upstream{u},
-		plugins:     plugins,
+		path:      path,
+		method:    http.MethodGet,
+		streaming: true,
+		upstreams: []upstream{u},
+		plugins:   plugins,
 	}
 }
 

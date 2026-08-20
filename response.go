@@ -7,15 +7,15 @@ import (
 )
 
 // ClientResponse is an output structure that wraps the final response from the gateway to the client.
+//
+// The request identifier and the partial-success signal are not duplicated
+// here: the former is only ever carried by the X-Request-ID response header
+// (RFC 9110 leaves correlation identifiers to headers, not the body), and
+// the latter is already the HTTP status code (206) - repeating it as a
+// `meta.partial` boolean was a redundant second source of truth.
 type ClientResponse struct {
 	Data   json.RawMessage `json:"data,omitempty"`
 	Errors []ClientError   `json:"errors,omitempty"`
-	Meta   ResponseMeta    `json:"meta,omitempty"`
-}
-
-type ResponseMeta struct {
-	RequestID string `json:"request_id,omitempty"`
-	Partial   bool   `json:"partial,omitempty"`
 }
 
 type ClientError string

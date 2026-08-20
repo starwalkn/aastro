@@ -7,6 +7,48 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.10.0] - YYYY-MM-DD
+
+### Fixed
+
+- Retries never fired for an upstream without an explicit `method:` — `retry_on_statuses`/timeout retries were
+  silently a no-op for the common case of relying on the flow's own method. `shouldRetry` judged idempotency against
+  the raw (often empty) config value instead of the effective method used for the actual request. (The 0.9.0 entry
+  below describing this as fixed was itself wrong: the switch cases changed, but the call site never did.)
+- The `TE` response header was never stripped despite being listed in the hop-by-hop set — the map key was the literal
+  string `"TE"`, but `net/http` always stores and iterates response headers in `net/textproto` canonical form, which
+  for `TE` is `Te` (no hyphen to separate words, so only the first letter is capitalized). The lookup silently missed
+  every time, leaking the header to the client. Every other entry in that set was already canonical.
+- `policy.header_blacklist` entries were matched by exact string, not canonicalized — `header_blacklist: ["x-secret"]`
+  silently never blocked a response header that `net/http` (correctly) stores as `X-Secret`. Same root cause as the
+  `TE` fix above: HTTP header names are case-insensitive, but the code was comparing them as case-sensitive strings.
+
+### Changed
+
+- **Breaking:** flow option `passthrough` renamed to `streaming` (config field, OpenAPI `x-aastro` extension, and
+  `aastroctl openapi import --mode`). Existing configs and specs must rename `passthrough: true` to `streaming: true`
+  before upgrading.
+- **Breaking:** a flow with exactly one upstream is no longer wrapped in the JSON response envelope
+  (`{"data": ..., "errors": ..., "meta": ...}`). Its upstream's status, headers, and body are now forwarded to the
+  client as-is - on success, and on a client error or redirect (2xx/3xx/4xx), including bodies that aren't valid
+  JSON, which previously got swallowed into an `UPSTREAM_CLIENT_ERROR`/`UPSTREAM_REDIRECT` envelope. Only a genuine
+  gateway-side failure (upstream unavailable, 5xx, timeout, policy violation) still returns the JSON error envelope.
+  Multi-upstream (aggregating) flows are unaffected. Single-upstream flows are now handled by their own dispatch
+  path, bypassing the scatter/aggregate machinery entirely - see `Router.dispatch`/`Router.buildProxyResponse`.
+- `aggregation` is no longer required for a single-upstream flow, since it's never read for one - only a flow with
+  more than one upstream must declare it (config validation enforces this in place of the old struct-tag check).
+- `aastroctl openapi import --mode envelope` renamed to `--mode proxy`, matching the response shape above; scaffolded
+  (single-upstream) flows no longer get a meaningless `aggregation: {strategy: array}` block.
+- Internal: the several independent switch statements over the upstream error classification (retry eligibility,
+  circuit breaker signal, policy applicability, client error code) were consolidated into one table
+  (`kindTable` in `upstream_error.go`), checked exhaustive at startup. Not user-facing, but worth knowing if you're
+  extending upstream error handling: add the new kind's row there rather than hunting down every switch.
+- **Breaking:** the JSON error envelope no longer has a `meta` field (`ResponseMeta`, `request_id`/`partial`) - it is
+  now just `{"data": ..., "errors": ...}`. The request identifier was already duplicated in the `X-Request-ID`
+  response header, and `partial` duplicated the `206` status code; both were a second, driftable source of the same
+  fact instead of the actual RFC 9110 mechanism (a correlation ID is a header concern, not a body field). Read the
+  request ID from `X-Request-ID` and partial success from the status code instead of `meta`.
+
 ## [0.9.0] — 2026-08-09
 
 ### Added

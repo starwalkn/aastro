@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/starwalkn/aastro"
@@ -216,20 +215,23 @@ func buildOperation(f aastro.FlowConfig, auth *aastro.MiddlewareConfig, rateLimi
 		}
 	}
 
-	if f.Passthrough {
-		op.Responses = passthroughResponses(rateLimited)
-
-		if auth != nil {
-			op.Responses["401"] = unauthorizedResponse()
-		}
+	switch {
+	case f.Streaming:
+		op.Responses = streamingResponses(rateLimited)
 		notes = append(notes,
-			"Passthrough flow: the upstream response is streamed to the client unbuffered (SSE-capable); status and body are proxied as-is.")
-	} else {
+			"Streaming flow: the upstream response is streamed to the client unbuffered (SSE-capable); status and body are proxied as-is.")
+	case len(f.Upstreams) == 1:
+		op.Responses = proxyResponses(rateLimited)
+		notes = append(notes,
+			"Proxy flow: the upstream's response (status, headers, body) is forwarded to the client as-is. "+
+				"Only a gateway-side failure — the upstream is unavailable, returns a server error, or fails "+
+				"gateway policy — is reported through the JSON error envelope instead.")
+	default:
 		op.Responses = envelopeResponses(f, rateLimited)
+	}
 
-		if auth != nil {
-			op.Responses["401"] = unauthorizedResponse()
-		}
+	if auth != nil {
+		op.Responses["401"] = unauthorizedResponse()
 	}
 
 	if len(notes) > 0 {
@@ -244,8 +246,8 @@ func buildOperation(f aastro.FlowConfig, auth *aastro.MiddlewareConfig, rateLimi
 }
 
 func summarize(f aastro.FlowConfig) string {
-	if f.Passthrough {
-		return fmt.Sprintf("Proxy to %s (passthrough)", upstreamNames(f.Upstreams))
+	if f.Streaming {
+		return fmt.Sprintf("Proxy to %s (streaming)", upstreamNames(f.Upstreams))
 	}
 
 	if len(f.Upstreams) == 1 {
@@ -396,7 +398,7 @@ func envelopeResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Respon
 
 	if f.Aggregation != nil {
 		if f.Aggregation.BestEffort && len(f.Upstreams) > 1 {
-			rs["206"] = envelopeResponse("Partial success: some upstreams failed (best-effort aggregation). `meta.partial` is true and `errors` lists the failures.")
+			rs["206"] = envelopeResponse("Partial success: some upstreams failed (best-effort aggregation). `errors` lists the failures.")
 		}
 
 		if f.Aggregation.Strategy == "merge" &&
@@ -410,12 +412,43 @@ func envelopeResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Respon
 		rs["429"] = envelopeResponse("Rate limit exceeded.")
 	}
 
-	addPropagatedStatuses(rs, f)
+	rs["default"] = &Response{
+		Description: propagationNote(),
+		Headers:     stdHeaders(),
+		Content: map[string]MediaType{
+			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
+		},
+	}
 
 	return rs
 }
 
-func passthroughResponses(rateLimited bool) map[string]*Response {
+// proxyResponses is used for a flow with exactly one upstream: it is not
+// aggregated (see Router.dispatch), so its answer is forwarded to the client
+// as-is rather than wrapped in the JSON envelope. The 200 entry is
+// necessarily opaque — the gateway has no static knowledge of the upstream's
+// schema, only that *something* comes back unmodified.
+func proxyResponses(rateLimited bool) map[string]*Response {
+	rs := map[string]*Response{
+		"200": {
+			Description: "Upstream response forwarded as-is: status, headers, and body are exactly what the upstream returned. " +
+				"This also covers 3xx/4xx answers from the upstream — those are proxied verbatim too, not translated into gateway errors.",
+			Headers: stdHeaders(),
+			Content: map[string]MediaType{"*/*": {}},
+		},
+		"413": envelopeResponse("Request body exceeds the gateway limit."),
+		"502": envelopeResponse("Upstream unavailable, returned a server error, or failed gateway policy validation."),
+		"500": envelopeResponse("Internal gateway error."),
+	}
+
+	if rateLimited {
+		rs["429"] = envelopeResponse("Rate limit exceeded.")
+	}
+
+	return rs
+}
+
+func streamingResponses(rateLimited bool) map[string]*Response {
 	rs := map[string]*Response{
 		"200": {
 			Description: "Upstream response streamed as-is. The actual status code, headers, and body are those returned by the upstream.",
@@ -470,7 +503,6 @@ func envelopeSchemas() map[string]*Schema {
 					Type:  "array",
 					Items: &Schema{Ref: "#/components/schemas/ClientError"},
 				},
-				"meta": {Ref: "#/components/schemas/ResponseMeta"},
 			},
 		},
 		"ClientError": {
@@ -488,16 +520,6 @@ func envelopeSchemas() map[string]*Schema {
 				"ABORTED",
 				"UNAUTHORIZED",
 				"VALUE_CONFLICT",
-			},
-		},
-		"ResponseMeta": {
-			Type: "object",
-			Properties: map[string]*Schema{
-				"request_id": {Type: "string"},
-				"partial": {
-					Type:        "boolean",
-					Description: "True when the response was assembled from a subset of upstreams (HTTP 206).",
-				},
 			},
 		},
 	}
@@ -547,8 +569,8 @@ func unauthorizedResponse() *Response {
 
 func flowExtension(f aastro.FlowConfig) *FlowExtension {
 	ext := &FlowExtension{
-		Passthrough: f.Passthrough,
-		Upstreams:   make([]UpstreamExtension, 0, len(f.Upstreams)),
+		Streaming: f.Streaming,
+		Upstreams: make([]UpstreamExtension, 0, len(f.Upstreams)),
 	}
 
 	if f.Aggregation != nil {
@@ -601,7 +623,6 @@ func policyExtension(p aastro.PolicyConfig) *PolicyExtension {
 
 	ext := &PolicyExtension{
 		HeaderBlacklist:     p.HeaderBlacklist,
-		AllowedStatuses:     p.AllowedStatuses,
 		RequireBody:         p.RequireBody,
 		MaxResponseBodySize: p.MaxResponseBodySize,
 		FollowRedirects:     p.FollowRedirects,
@@ -639,86 +660,13 @@ func transportExtension(t aastro.TransportConfig) *TransportExtension {
 	}
 }
 
-func addPropagatedStatuses(rs map[string]*Response, f aastro.FlowConfig) {
-	allowed, open := allowedStatuses(f)
-
-	if len(f.Upstreams) == 1 && !open {
-		for _, status := range allowed {
-			key := strconv.Itoa(status)
-			if _, exists := rs[key]; exists {
-				continue
-			}
-
-			rs[key] = allowedStatusResponse(status)
-		}
-
-		return
-	}
-
-	if !open {
-		return
-	}
-
-	rs["default"] = &Response{
-		Description: propagationNote(len(f.Upstreams)),
-		Headers:     stdHeaders(),
-		Content: map[string]MediaType{
-			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
-		},
-	}
-}
-
-func allowedStatuses(f aastro.FlowConfig) (statuses []int, open bool) {
-	set := make(map[int]struct{})
-
-	for _, u := range f.Upstreams {
-		if len(u.Policy.AllowedStatuses) == 0 {
-			open = true
-			continue
-		}
-
-		for _, s := range u.Policy.AllowedStatuses {
-			set[s] = struct{}{}
-		}
-	}
-
-	statuses = make([]int, 0, len(set))
-	for s := range set {
-		statuses = append(statuses, s)
-	}
-
-	sort.Ints(statuses)
-
-	return statuses, open
-}
-
-func propagationNote(upstreamCount int) string {
-	if upstreamCount == 1 {
-		return "Upstream status propagated verbatim. A single-upstream flow acts as a proxy: " +
-			"redirects and client errors (3xx, 4xx) returned by the upstream reach the client unchanged, " +
-			"with the upstream body carried in `data` when it is valid JSON. " +
-			"Server errors and transport failures are reported as 502 instead."
-	}
-
+// propagationNote documents envelopeResponses's "default" entry, which is
+// only reached for a multi-upstream flow — a single-upstream flow is
+// documented by proxyResponses instead and never calls this.
+func propagationNote() string {
 	return "Upstream status propagated verbatim. When every failing upstream returns the same " +
 		"client error status (typically 401 or 403 from a shared auth layer), that status is " +
 		"forwarded instead of 502."
-}
-
-func allowedStatusResponse(status int) *Response {
-	if status == http.StatusNoContent || status == http.StatusNotModified {
-		return &Response{
-			Description: "Upstream returned " + strconv.Itoa(status) + "; no response body.",
-			Headers:     stdHeaders(),
-		}
-	}
-
-	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		return envelopeResponse("Successful response (upstream status " + strconv.Itoa(status) + ").")
-	}
-
-	return envelopeResponse("Upstream status " + strconv.Itoa(status) +
-		", declared acceptable via `allowed_statuses` and propagated to the client.")
 }
 
 func operationID(method, path string) string {

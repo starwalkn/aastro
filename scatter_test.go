@@ -47,6 +47,34 @@ var _ = Describe("Scatter", func() {
 		})
 	})
 
+	Describe("call", func() {
+		It("calls the single upstream directly, without a result slice", func() {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("solo"))
+			}))
+			defer server.Close()
+
+			f := newTestFlow([]upstream{newTestUpstream(server.URL)})
+
+			resp, ok := newTestScatter().call(f, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			Expect(ok).To(BeTrue())
+			Expect(resp.err).ToNot(HaveOccurred())
+			Expect(string(resp.body)).To(Equal("solo"))
+		})
+
+		It("returns ok=false for an oversized request body", func() {
+			f := newTestFlow([]upstream{newTestUpstream("http://localhost")})
+
+			oversizedBody := bytes.Repeat([]byte("x"), maxBodySize+1)
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(oversizedBody))
+
+			_, ok := newTestScatter().call(f, req)
+
+			Expect(ok).To(BeFalse())
+		})
+	})
+
 	Describe("forwarding request data", func() {
 		It("forwards POST body to upstream", func() {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,22 +199,6 @@ var _ = Describe("Scatter", func() {
 			Expect(results[1].err.Unwrap()).To(MatchError("empty body not allowed by upstream policy"))
 		})
 
-		It("rejects unexpected status codes", func() {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusTeapot)
-			}))
-			defer server.Close()
-
-			f := newTestFlow([]upstream{
-				newTestUpstream(server.URL, withPolicy(upstreamPolicy{allowedStatuses: []int{http.StatusOK}})),
-			})
-
-			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
-
-			Expect(results).To(HaveLen(1))
-			Expect(results[0].err).To(HaveOccurred())
-		})
-
 		It("rejects responses larger than max_response_body_size", func() {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte("abcdefghijklmnopqrstuvwxyz"))
@@ -237,6 +249,40 @@ var _ = Describe("Scatter", func() {
 
 			f := newTestFlow([]upstream{
 				newTestUpstream(server.URL, withPolicy(upstreamPolicy{
+					retry: retryPolicy{
+						maxRetries:      3,
+						retryOnStatuses: []int{http.StatusInternalServerError},
+						backoffDelay:    10 * time.Millisecond,
+					},
+				})),
+			})
+
+			results := newTestScatter().scatter(f, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			Expect(results).To(HaveLen(1))
+			Expect(results[0].err).ToNot(HaveOccurred())
+			Expect(attempts.Load()).To(Equal(int32(3)))
+		})
+
+		It("still retries when the upstream has no explicit method (falls back to the request's)", func() {
+			// Regression test: shouldRetry must judge idempotency against the
+			// effective method (config method, falling back to the original
+			// request's), not the raw config value — an unset upstream method
+			// used to make isIdempotent("") always false, silently disabling
+			// retries for the common case of not overriding the method.
+			var attempts atomic.Int32
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if attempts.Add(1) <= 2 {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			f := newTestFlow([]upstream{
+				newTestUpstream(server.URL, withMethod(""), withPolicy(upstreamPolicy{
 					retry: retryPolicy{
 						maxRetries:      3,
 						retryOnStatuses: []int{http.StatusInternalServerError},

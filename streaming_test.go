@@ -14,7 +14,7 @@ import (
 	"github.com/starwalkn/aastro/sdk"
 )
 
-var _ = Describe("Passthrough", func() {
+var _ = Describe("Streaming", func() {
 	Context("with a streaming SSE response", func() {
 		It("forwards body and headers without buffering", func() {
 			u := &mockProxyUpstream{
@@ -28,7 +28,7 @@ var _ = Describe("Passthrough", func() {
 				},
 			}
 
-			r := newTestRouter([]flow{passthroughFlow("/stream", u)}, nil, nil)
+			r := newTestRouter([]flow{streamingFlow("/stream", u)}, nil, nil)
 			req := httptest.NewRequest(http.MethodGet, "/stream", nil)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
@@ -59,7 +59,7 @@ var _ = Describe("Passthrough", func() {
 				},
 			}
 
-			r := newTestRouter([]flow{passthroughFlow("/events", u)}, nil, nil)
+			r := newTestRouter([]flow{streamingFlow("/events", u)}, nil, nil)
 			req := httptest.NewRequest(http.MethodGet, "/events", nil)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
@@ -95,7 +95,7 @@ var _ = Describe("Passthrough", func() {
 				},
 			}
 
-			r := newTestRouter([]flow{passthroughFlow("/plugin", u, plugin)}, nil, nil)
+			r := newTestRouter([]flow{streamingFlow("/plugin", u, plugin)}, nil, nil)
 			req := httptest.NewRequest(http.MethodGet, "/plugin", nil)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
@@ -114,7 +114,7 @@ var _ = Describe("Passthrough", func() {
 				},
 			}
 
-			r := newTestRouter([]flow{passthroughFlow("/broken", u)}, nil, nil)
+			r := newTestRouter([]flow{streamingFlow("/broken", u)}, nil, nil)
 			req := httptest.NewRequest(http.MethodGet, "/broken", nil)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
@@ -134,7 +134,7 @@ var _ = Describe("Passthrough", func() {
 				},
 			}
 
-			r := newTestRouter([]flow{passthroughFlow("/partial", u)}, nil, nil)
+			r := newTestRouter([]flow{streamingFlow("/partial", u)}, nil, nil)
 			req := httptest.NewRequest(http.MethodGet, "/partial", nil)
 			rec := httptest.NewRecorder()
 
@@ -148,10 +148,10 @@ var _ = Describe("Passthrough", func() {
 			u := &mockUpstream{upstreamName: "plain"}
 
 			r := newTestRouter([]flow{{
-				path:        "/noproxy",
-				method:      http.MethodGet,
-				passthrough: true,
-				upstreams:   []upstream{u},
+				path:      "/noproxy",
+				method:    http.MethodGet,
+				streaming: true,
+				upstreams: []upstream{u},
 			}}, nil, nil)
 
 			req := httptest.NewRequest(http.MethodGet, "/noproxy", nil)
@@ -163,7 +163,7 @@ var _ = Describe("Passthrough", func() {
 	})
 
 	Context("with multiple upstreams", func() {
-		It("returns 500 because passthrough requires exactly one", func() {
+		It("returns 500 because streaming requires exactly one", func() {
 			makeU := func(n string) upstream {
 				return &mockProxyUpstream{
 					upstreamName: n,
@@ -175,10 +175,10 @@ var _ = Describe("Passthrough", func() {
 			}
 
 			r := newTestRouter([]flow{{
-				path:        "/multi",
-				method:      http.MethodGet,
-				passthrough: true,
-				upstreams:   []upstream{makeU("a"), makeU("b")},
+				path:      "/multi",
+				method:    http.MethodGet,
+				streaming: true,
+				upstreams: []upstream{makeU("a"), makeU("b")},
 			}}, nil, nil)
 
 			req := httptest.NewRequest(http.MethodGet, "/multi", nil)
@@ -199,7 +199,7 @@ var _ = Describe("Passthrough", func() {
 				},
 			}
 
-			r := newTestRouter([]flow{passthroughFlow("/created", u)}, nil, nil)
+			r := newTestRouter([]flow{streamingFlow("/created", u)}, nil, nil)
 			req := httptest.NewRequest(http.MethodGet, "/created", nil)
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)

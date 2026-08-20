@@ -15,47 +15,6 @@ var _ = Describe("Aggregator", func() {
 		agg = &defaultAggregator{}
 	})
 
-	Describe("with a single response", func() {
-		It("returns success", func() {
-			result := agg.aggregate(
-				nil,
-				[]upstreamResponse{okResponse(`{"a":1}`)},
-				aggregation{strategy: strategyArray},
-				zap.NewNop(),
-			)
-
-			Expect(result.errors).To(BeEmpty())
-			Expect(result.partial).To(BeFalse())
-			jsonEqual(`{"a":1}`, result.data)
-		})
-
-		It("maps upstream error to client error", func() {
-			result := agg.aggregate(
-				nil,
-				[]upstreamResponse{errResponse(upstreamTimeout)},
-				aggregation{strategy: strategyArray},
-				zap.NewNop(),
-			)
-
-			Expect(result.data).To(BeNil())
-			Expect(result.partial).To(BeFalse())
-			Expect(result.errors).To(ConsistOf(ClientErrUpstreamUnavailable))
-		})
-
-		It("handles nil body", func() {
-			result := agg.aggregate(
-				nil,
-				[]upstreamResponse{{body: nil}},
-				aggregation{strategy: strategyMerge},
-				zap.NewNop(),
-			)
-
-			Expect(result.data).To(BeNil())
-			Expect(result.errors).To(BeEmpty())
-			Expect(result.partial).To(BeFalse())
-		})
-	})
-
 	Describe("merge strategy", func() {
 		var responses []upstreamResponse
 
@@ -184,7 +143,7 @@ var _ = Describe("Aggregator", func() {
 
 	DescribeTable("mapUpstreamError",
 		func(kind upstreamErrorKind, want ClientError) {
-			got := agg.mapUpstreamError(&upstreamError{
+			got := mapUpstreamError(&upstreamError{
 				kind: kind,
 				err:  errors.New("err"),
 			})

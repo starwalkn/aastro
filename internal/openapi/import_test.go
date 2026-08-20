@@ -30,7 +30,7 @@ var _ = Describe("ToConfig", func() {
 					u.ForwardParams = []string{"id"}
 					return u
 				}(), minimalUpstream("profile")),
-				passthroughFlow("/api/v1/events"),
+				streamingFlow("/api/v1/events"),
 			)
 			original.Gateway.Routing.Flows[0].Aggregation.OnConflict.Upstream = "billing"
 
@@ -71,12 +71,12 @@ var _ = Describe("ToConfig", func() {
 			Expect(flow.Upstreams[1].Timeout).To(Equal(3 * time.Second))
 		})
 
-		It("restores passthrough flows without aggregation", func() {
-			doc, _ := generate(configWith(false, passthroughFlow("/s")), Options{Extensions: true})
+		It("restores streaming flows without aggregation", func() {
+			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{Extensions: true})
 			cfg, _ := importDoc(doc, ImportOptions{})
 
 			flow := cfg.Gateway.Routing.Flows[0]
-			Expect(flow.Passthrough).To(BeTrue())
+			Expect(flow.Streaming).To(BeTrue())
 			Expect(flow.Aggregation).To(BeNil())
 		})
 
@@ -145,7 +145,7 @@ var _ = Describe("ToConfig", func() {
 			}
 		}
 
-		It("builds a single-upstream envelope flow from an operation", func() {
+		It("builds a single-upstream proxy flow from an operation", func() {
 			cfg, warnings := importDoc(foreignDoc(), ImportOptions{})
 
 			Expect(cfg.Schema).To(Equal("v1"))
@@ -155,8 +155,10 @@ var _ = Describe("ToConfig", func() {
 			flow := cfg.Gateway.Routing.Flows[0]
 			Expect(flow.Path).To(Equal("/pets/{petId}"))
 			Expect(flow.Method).To(Equal("GET"))
-			Expect(flow.Passthrough).To(BeFalse())
-			Expect(flow.Aggregation.Strategy).To(Equal("array"))
+			Expect(flow.Streaming).To(BeFalse())
+			// A scaffolded flow always has exactly one upstream, so it is
+			// proxied directly and never aggregates (see Router.dispatch).
+			Expect(flow.Aggregation).To(BeNil())
 
 			up := flow.Upstreams[0]
 			Expect(up.Name).To(Equal("getpetbyid"))
@@ -180,11 +182,11 @@ var _ = Describe("ToConfig", func() {
 			Expect(warnings).To(ContainElement(HaveField("Message", ContainSubstring("placeholder host"))))
 		})
 
-		It("scaffolds passthrough flows when requested", func() {
-			cfg, _ := importDoc(foreignDoc(), ImportOptions{Mode: "passthrough"})
+		It("scaffolds streaming flows when requested", func() {
+			cfg, _ := importDoc(foreignDoc(), ImportOptions{Mode: "streaming"})
 
 			flow := cfg.Gateway.Routing.Flows[0]
-			Expect(flow.Passthrough).To(BeTrue())
+			Expect(flow.Streaming).To(BeTrue())
 			Expect(flow.Aggregation).To(BeNil())
 		})
 
@@ -212,7 +214,6 @@ var _ = Describe("ToConfig", func() {
 			u.Transport = aastro.TransportConfig{MaxIdleConns: 100, MaxIdleConnsPerHost: 50, IdleConnTimeout: 90 * time.Second}
 			u.Policy = aastro.PolicyConfig{
 				HeaderBlacklist:     []string{"X-Internal-Token"},
-				AllowedStatuses:     []int{200, 204},
 				RequireBody:         true,
 				MaxResponseBodySize: 1 << 20,
 				FollowRedirects:     true,
@@ -268,7 +269,7 @@ var _ = Describe("ToConfig", func() {
 	})
 
 	Describe("scaffold heuristics", func() {
-		It("detects streamed operations and scaffolds them as passthrough", func() {
+		It("detects streamed operations and scaffolds them as streaming", func() {
 			doc := foreign()
 			doc.Paths["/stream"] = &PathItem{
 				Get: &Operation{
@@ -289,11 +290,11 @@ var _ = Describe("ToConfig", func() {
 			}
 
 			Expect(streamFlow).NotTo(BeNil())
-			Expect(streamFlow.Passthrough).To(BeTrue())
+			Expect(streamFlow.Streaming).To(BeTrue())
 			Expect(streamFlow.Aggregation).To(BeNil())
 			Expect(warnings).To(ContainElement(SatisfyAll(
 				HaveField("Flow", "GET /stream"),
-				HaveField("Message", ContainSubstring("passthrough")),
+				HaveField("Message", ContainSubstring("streaming")),
 			)))
 		})
 
@@ -312,7 +313,7 @@ var _ = Describe("ToConfig", func() {
 				Expect(w.Message).NotTo(ContainSubstring("--extensions"))
 			}
 
-			doc, _ := generate(configWith(false, passthroughFlow("/s")), Options{Extensions: true})
+			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{Extensions: true})
 			_, warnings = importDoc(doc, ImportOptions{})
 			for _, w := range warnings {
 				Expect(w.Message).NotTo(ContainSubstring("--extensions"))

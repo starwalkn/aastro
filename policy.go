@@ -7,7 +7,6 @@ import "time"
 type upstreamPolicy struct {
 	// Response validation
 	headerBlacklist     map[string]struct{}
-	allowedStatuses     []int
 	requireBody         bool
 	maxResponseBodySize int64
 

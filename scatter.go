@@ -20,6 +20,7 @@ const maxBodySize = 5 << 20 // 5 MB
 
 type scatter interface {
 	scatter(f *flow, original *http.Request) []upstreamResponse
+	call(f *flow, original *http.Request) (upstreamResponse, bool)
 }
 
 type defaultScatter struct {
@@ -65,6 +66,34 @@ func (d *defaultScatter) scatter(f *flow, original *http.Request) []upstreamResp
 	wg.Wait()
 
 	return results
+}
+
+// call reads the request body once, then invokes the flow's single upstream
+// directly — no goroutine, no result slice. It backs single-upstream flows,
+// which bypass the aggregator entirely (see Router.buildProxyResponse).
+// Returns (response, true) on success, or (zero value, false) when the body
+// is unreadable or exceeds maxBodySize — the caller treats false as a signal
+// to respond with 413.
+func (d *defaultScatter) call(f *flow, original *http.Request) (upstreamResponse, bool) {
+	log := d.log.With(zap.String("request_id", requestIDFromContext(original.Context())))
+
+	tracer := otel.Tracer(tracing.TracerName)
+	ctx, span := tracer.Start(original.Context(), "aastro.scatter",
+		trace.WithAttributes(
+			attribute.Int("aastro.upstream.count", 1),
+		),
+	)
+	defer span.End()
+
+	original = original.WithContext(ctx)
+
+	body, ok := d.readBody(original, log)
+	if !ok {
+		span.SetStatus(codes.Error, "body too large")
+		return upstreamResponse{}, false
+	}
+
+	return d.callUpstream(f, f.upstreams[0], original, body, log), true
 }
 
 // readBody consumes and closes original.Body, enforcing maxBodySize.

@@ -19,10 +19,10 @@ var _ = Describe("builder", func() {
 				Service: ServiceConfig{Name: "aastro-test"},
 				Routing: RoutingConfig{
 					Flows: []FlowConfig{{
-						Path:        "/test",
-						Method:      http.MethodGet,
-						Passthrough: true,
-						Upstreams:   []UpstreamConfig{testUpstreamConfig("7001")},
+						Path:      "/test",
+						Method:    http.MethodGet,
+						Streaming: true,
+						Upstreams: []UpstreamConfig{testUpstreamConfig("7001")},
 					}},
 				},
 			}
@@ -40,9 +40,9 @@ var _ = Describe("builder", func() {
 				Service: ServiceConfig{Name: "aastro-test"},
 				Routing: RoutingConfig{
 					Flows: []FlowConfig{{
-						Path:        "/bad",
-						Passthrough: true,
-						Upstreams:   []UpstreamConfig{testUpstreamConfig("7001"), testUpstreamConfig("7002")},
+						Path:      "/bad",
+						Streaming: true,
+						Upstreams: []UpstreamConfig{testUpstreamConfig("7001"), testUpstreamConfig("7002")},
 					}},
 				},
 			}
@@ -103,11 +103,11 @@ var _ = Describe("builder", func() {
 	})
 
 	Describe("compileFlow", func() {
-		It("rejects passthrough flows with multiple upstreams", func() {
+		It("rejects streaming flows with multiple upstreams", func() {
 			cfg := FlowConfig{
-				Path:        "/builder/test",
-				Method:      http.MethodGet,
-				Passthrough: true,
+				Path:      "/builder/test",
+				Method:    http.MethodGet,
+				Streaming: true,
 				Upstreams: []UpstreamConfig{
 					testUpstreamConfig("7001"),
 					testUpstreamConfig("7002"),
@@ -122,11 +122,12 @@ var _ = Describe("builder", func() {
 
 		It("propagates aggregation initialization errors", func() {
 			cfg := FlowConfig{
-				Path:        "/builder/test",
-				Method:      http.MethodGet,
-				Passthrough: false,
+				Path:      "/builder/test",
+				Method:    http.MethodGet,
+				Streaming: false,
 				Upstreams: []UpstreamConfig{
 					testUpstreamConfig("7001"),
+					testUpstreamConfig("7002"),
 				},
 				Aggregation: &AggregationConfig{
 					BestEffort: false,
@@ -140,11 +141,11 @@ var _ = Describe("builder", func() {
 			Expect(err).To(MatchError(ContainSubstring("init aggregation")))
 		})
 
-		It("compiles a passthrough flow", func() {
+		It("compiles a streaming flow", func() {
 			cfg := FlowConfig{
-				Path:        "/builder/test",
-				Method:      http.MethodGet,
-				Passthrough: true,
+				Path:      "/builder/test",
+				Method:    http.MethodGet,
+				Streaming: true,
 				Upstreams: []UpstreamConfig{
 					testUpstreamConfig("7001"),
 				},
@@ -158,14 +159,14 @@ var _ = Describe("builder", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeZero())
 			Expect(f.upstreams).To(HaveLen(1))
-			Expect(f.passthrough).To(BeTrue())
+			Expect(f.streaming).To(BeTrue())
 		})
 
 		It("compiles a fan-out flow with aggregation", func() {
 			cfg := FlowConfig{
-				Path:        "/builder/test",
-				Method:      http.MethodGet,
-				Passthrough: false,
+				Path:      "/builder/test",
+				Method:    http.MethodGet,
+				Streaming: false,
 				Upstreams: []UpstreamConfig{
 					testUpstreamConfig("7001"),
 					testUpstreamConfig("7002"),
@@ -180,7 +181,7 @@ var _ = Describe("builder", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeZero())
 			Expect(f.upstreams).To(HaveLen(2))
-			Expect(f.passthrough).To(BeFalse())
+			Expect(f.streaming).To(BeFalse())
 		})
 	})
 
@@ -277,6 +278,24 @@ var _ = Describe("builder", func() {
 				Expect(u).NotTo(BeNil())
 				Expect(u.name()).To(Equal("get-test-service:7001-test-service:7002"))
 			})
+		})
+	})
+
+	Describe("buildUpstreamPolicy", func() {
+		It("matches a blacklist entry regardless of its case", func() {
+			// Regression test: entries were used as map keys verbatim, but
+			// net/http always stores response headers in net/textproto
+			// canonical form — a config value like "x-secret" silently never
+			// matched the "X-Secret" key filterHeaders actually sees.
+			policy := buildUpstreamPolicy(PolicyConfig{
+				HeaderBlacklist: []string{"x-secret", "X-ALREADY-CANONICAL-ISH"},
+			})
+
+			_, blocksLowercase := policy.headerBlacklist["X-Secret"]
+			Expect(blocksLowercase).To(BeTrue())
+
+			_, blocksOther := policy.headerBlacklist["X-Already-Canonical-Ish"]
+			Expect(blocksOther).To(BeTrue())
 		})
 	})
 })

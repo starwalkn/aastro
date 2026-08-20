@@ -31,17 +31,16 @@ var (
 	}
 )
 
-// aggregate combines multiple upstream responses based on the flow's strategy.
-// A single response is returned as-is. Multiple responses are aggregated either
-// by merging JSON objects ("merge"), creating a JSON array ("array"),
-// or namespacing each upstream under its name ("namespace").
-// Upstream errors respect bestEffort: partial results may be returned
-// if allowed, otherwise a single error response is returned.
+// aggregate combines multiple upstream responses based on the flow's strategy,
+// by merging JSON objects ("merge"), creating a JSON array ("array"), or
+// namespacing each upstream under its name ("namespace"). Upstream errors
+// respect bestEffort: partial results may be returned if allowed, otherwise
+// a single error response is returned.
+//
+// aggregate is only ever called for flows with more than one upstream — a
+// single-upstream flow is proxied directly by Router.buildProxyResponse and
+// never reaches the aggregator (see router.go).
 func (a *defaultAggregator) aggregate(upstreams []upstream, responses []upstreamResponse, agg aggregation, log *zap.Logger) aggregatedResponse {
-	if len(responses) == 1 {
-		return a.rawResponse(responses[0])
-	}
-
 	switch agg.strategy {
 	case strategyMerge:
 		return a.merged(responses, agg, log)
@@ -52,39 +51,6 @@ func (a *defaultAggregator) aggregate(upstreams []upstream, responses []upstream
 	default:
 		log.Error("unknown aggregation strategy", zap.String("strategy", agg.strategy.String()))
 		return aggregatedResponse{}
-	}
-}
-
-func (a *defaultAggregator) rawResponse(resp upstreamResponse) aggregatedResponse {
-	if resp.err != nil {
-		switch resp.err.kind {
-		case upstreamClientError, upstreamRedirect:
-			out := aggregatedResponse{
-				headers: resp.headers,
-				status:  resp.status,
-			}
-
-			if json.Valid(resp.body) {
-				out.data = resp.body
-			} else {
-				out.errors = []ClientError{a.mapUpstreamError(resp.err)}
-			}
-
-			return out
-		case upstreamTimeout, upstreamCanceled, upstreamConnection,
-			upstreamBadStatus, upstreamReadError, upstreamBodyTooLarge,
-			upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
-
-			return aggregatedResponse{errors: []ClientError{a.mapUpstreamError(resp.err)}}
-		default:
-			return aggregatedResponse{errors: []ClientError{a.mapUpstreamError(resp.err)}}
-		}
-	}
-
-	return aggregatedResponse{
-		data:    resp.body,
-		headers: mergeSuccessfulHeaders([]upstreamResponse{resp}),
-		status:  resp.status,
 	}
 }
 
@@ -133,7 +99,7 @@ func (a *defaultAggregator) collectFields(
 			log.Warn("upstream has errors",
 				zap.Bool("best_effort", agg.bestEffort),
 				zap.String("upstream_error", resp.err.Unwrap().Error()),
-				zap.String("client_error", a.mapUpstreamError(resp.err).String()),
+				zap.String("client_error", mapUpstreamError(resp.err).String()),
 			)
 
 			if !agg.bestEffort {
@@ -145,7 +111,7 @@ func (a *defaultAggregator) collectFields(
 				return nil, nil, false, &r
 			}
 
-			aggErrors = append(aggErrors, a.mapUpstreamError(resp.err))
+			aggErrors = append(aggErrors, mapUpstreamError(resp.err))
 
 			continue
 		}
@@ -218,7 +184,7 @@ func (a *defaultAggregator) arrayed(responses []upstreamResponse, agg aggregatio
 			log.Warn("upstream has errors",
 				zap.Bool("best_effort", agg.bestEffort),
 				zap.String("upstream_error", resp.err.Unwrap().Error()),
-				zap.String("client_error", a.mapUpstreamError(resp.err).String()),
+				zap.String("client_error", mapUpstreamError(resp.err).String()),
 			)
 
 			if !agg.bestEffort {
@@ -228,7 +194,7 @@ func (a *defaultAggregator) arrayed(responses []upstreamResponse, agg aggregatio
 				}
 			}
 
-			aggErrors = append(aggErrors, a.mapUpstreamError(resp.err))
+			aggErrors = append(aggErrors, mapUpstreamError(resp.err))
 
 			continue
 		}
@@ -267,12 +233,12 @@ func (a *defaultAggregator) namespaced(upstreams []upstream, responses []upstrea
 		if resp.err != nil {
 			if !agg.bestEffort {
 				return aggregatedResponse{
-					errors: []ClientError{a.mapUpstreamError(resp.err)},
+					errors: []ClientError{mapUpstreamError(resp.err)},
 					status: sharedFailureStatus(responses),
 				}
 			}
 
-			aggErrors = append(aggErrors, a.mapUpstreamError(resp.err))
+			aggErrors = append(aggErrors, mapUpstreamError(resp.err))
 
 			continue
 		}
@@ -306,7 +272,7 @@ func (a *defaultAggregator) collectErrors(responses []upstreamResponse) []Client
 
 	for _, r := range responses {
 		if r.err != nil {
-			errs = append(errs, a.mapUpstreamError(r.err))
+			errs = append(errs, mapUpstreamError(r.err))
 		}
 	}
 
@@ -327,33 +293,6 @@ func mergeSuccessfulHeaders(responses []upstreamResponse) http.Header {
 	}
 
 	return merged
-}
-
-func (a *defaultAggregator) mapUpstreamError(err *upstreamError) ClientError {
-	if err == nil {
-		return ClientErrInternal
-	}
-
-	switch err.kind {
-	case upstreamTimeout, upstreamConnection, upstreamCircuitOpen:
-		return ClientErrUpstreamUnavailable
-	case upstreamBadStatus:
-		return ClientErrUpstreamError
-	case upstreamClientError:
-		return ClientErrUpstreamClientError
-	case upstreamRedirect:
-		return ClientErrUpstreamRedirect
-	case upstreamBodyTooLarge:
-		return ClientErrUpstreamBodyTooLarge
-	case upstreamCanceled:
-		return ClientErrAborted
-	case upstreamReadError, upstreamInternal:
-		return ClientErrInternal
-	case upstreamPolicyViolation:
-		return ClientErrUpstreamMalformed
-	default:
-		return ClientErrInternal
-	}
 }
 
 func dedupeErrors(errs []ClientError) []ClientError {
