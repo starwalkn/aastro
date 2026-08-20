@@ -9,8 +9,8 @@ on:
       - "[0-9]+.[0-9]+.[0-9]+"
 
 env:
-  GO_VERSION: 1.26.3
-  GOLANGCI_LINT_VERSION: v2.12.2
+  GO_VERSION: 1.26.7
+  GOLANGCI_LINT_VERSION: v2.13.1
 
 jobs:
   test:
@@ -19,10 +19,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -32,7 +32,7 @@ jobs:
           ginkgo -v -r -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
@@ -44,7 +44,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -52,7 +52,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v9.2.0
+        uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
@@ -63,10 +63,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage
 
