@@ -7,7 +7,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.10.0] - YYYY-MM-DD
+## [0.10.0] - 2026-08-28
 
 ### Fixed
 
