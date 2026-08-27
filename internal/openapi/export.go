@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/starwalkn/aastro"
@@ -45,7 +44,7 @@ const (
 
 	maxBodySizeNote = "Request bodies larger than 5 MiB are rejected with 413."
 
-	schemaClientResponse = "#/components/schemas/ClientResponse"
+	schemaProblemDetails = "#/components/schemas/ProblemDetails"
 
 	securitySchemeBearer = "bearerAuth"
 
@@ -85,7 +84,7 @@ func FromConfig(cfg aastro.Config, opts Options) (*Document, []Warning, error) {
 	rateLimited := cfg.Gateway.Routing.RateLimiter.Enabled
 	tags := make(map[string]struct{})
 
-	needEnvelope := len(cfg.Gateway.Routing.Flows) > 0
+	needProblemSchemas := len(cfg.Gateway.Routing.Flows) > 0
 
 	var needAuthScheme bool
 
@@ -117,11 +116,11 @@ func FromConfig(cfg aastro.Config, opts Options) (*Document, []Warning, error) {
 	}
 	sort.Slice(doc.Tags, func(i, j int) bool { return doc.Tags[i].Name < doc.Tags[j].Name })
 
-	if needEnvelope || needAuthScheme {
+	if needProblemSchemas || needAuthScheme {
 		doc.Components = &Components{}
 
-		if needEnvelope {
-			doc.Components.Schemas = envelopeSchemas()
+		if needProblemSchemas {
+			doc.Components.Schemas = problemSchemas()
 		}
 
 		if needAuthScheme {
@@ -216,20 +215,23 @@ func buildOperation(f aastro.FlowConfig, auth *aastro.MiddlewareConfig, rateLimi
 		}
 	}
 
-	if f.Passthrough {
-		op.Responses = passthroughResponses(rateLimited)
-
-		if auth != nil {
-			op.Responses["401"] = unauthorizedResponse()
-		}
+	switch {
+	case f.Streaming:
+		op.Responses = streamingResponses(rateLimited)
 		notes = append(notes,
-			"Passthrough flow: the upstream response is streamed to the client unbuffered (SSE-capable); status and body are proxied as-is.")
-	} else {
-		op.Responses = envelopeResponses(f, rateLimited)
+			"Streaming flow: the upstream response is streamed to the client unbuffered (SSE-capable); status and body are proxied as-is.")
+	case len(f.Upstreams) == 1:
+		op.Responses = proxyResponses(rateLimited)
+		notes = append(notes,
+			"Proxy flow: the upstream's response (status, headers, body) is forwarded to the client as-is. "+
+				"Only a gateway-side failure - the upstream is unavailable, returns a server error, or fails "+
+				"gateway policy - is reported through the JSON error envelope instead.")
+	default:
+		op.Responses = aggregateResponses(f, rateLimited)
+	}
 
-		if auth != nil {
-			op.Responses["401"] = unauthorizedResponse()
-		}
+	if auth != nil {
+		op.Responses["401"] = unauthorizedResponse()
 	}
 
 	if len(notes) > 0 {
@@ -244,8 +246,8 @@ func buildOperation(f aastro.FlowConfig, auth *aastro.MiddlewareConfig, rateLimi
 }
 
 func summarize(f aastro.FlowConfig) string {
-	if f.Passthrough {
-		return fmt.Sprintf("Proxy to %s (passthrough)", upstreamNames(f.Upstreams))
+	if f.Streaming {
+		return fmt.Sprintf("Proxy to %s (streaming)", upstreamNames(f.Upstreams))
 	}
 
 	if len(f.Upstreams) == 1 {
@@ -386,59 +388,107 @@ func hasRequestBody(method string) bool {
 	}
 }
 
-func envelopeResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Response {
+// aggregateResponses is used for a flow with more than one upstream. Success
+// and partial success (206, bestEffort) return the aggregated data itself -
+// its shape depends on the flow's upstreams and aggregation strategy, so,
+// like proxyResponses's 200, it is undocumented content rather than a
+// schema ref. Only a response with no data at all (every upstream failed)
+// uses the Problem Details schema.
+func aggregateResponses(f aastro.FlowConfig, rateLimited bool) map[string]*Response {
 	rs := map[string]*Response{
-		"200": envelopeResponse("Successful response."),
-		"413": envelopeResponse("Request body exceeds the gateway limit."),
-		"502": envelopeResponse("Upstream error, unavailable, or malformed response."),
-		"500": envelopeResponse("Internal gateway error."),
+		"200": {
+			Description: "Aggregated upstream data (`merge`/`array`/`namespace`), with no gateway wrapper.",
+			Headers:     stdHeaders(),
+			Content:     map[string]MediaType{"application/json": {}},
+		},
+		"413": problemResponse("Request body exceeds the gateway limit."),
+		"502": problemResponse("Every upstream failed, was unavailable, or returned a malformed response."),
+		"500": problemResponse("Internal gateway error."),
 	}
 
 	if f.Aggregation != nil {
 		if f.Aggregation.BestEffort && len(f.Upstreams) > 1 {
-			rs["206"] = envelopeResponse("Partial success: some upstreams failed (best-effort aggregation). `meta.partial` is true and `errors` lists the failures.")
+			rs["206"] = &Response{
+				Description: "Partial success: some upstreams failed (best-effort aggregation). The body is the data from the " +
+					"upstreams that succeeded, in the same shape as 200; `X-Partial-Errors` carries one value per failure.",
+				Headers: partialHeaders(),
+				Content: map[string]MediaType{"application/json": {}},
+			}
 		}
 
 		if f.Aggregation.Strategy == "merge" &&
 			f.Aggregation.OnConflict != nil &&
 			f.Aggregation.OnConflict.Policy == "error" {
-			rs["409"] = envelopeResponse("Merge conflict: upstreams returned different values for the same field (`on_conflict: error`).")
+			rs["409"] = problemResponse("Merge conflict: upstreams returned different values for the same field (`on_conflict: error`).")
 		}
 	}
 
 	if rateLimited {
-		rs["429"] = envelopeResponse("Rate limit exceeded.")
+		rs["429"] = problemResponse("Rate limit exceeded.")
 	}
 
-	addPropagatedStatuses(rs, f)
+	rs["default"] = &Response{
+		Description: propagationNote(),
+		Headers:     stdHeaders(),
+		Content: map[string]MediaType{
+			"application/problem+json": {Schema: &Schema{Ref: schemaProblemDetails}},
+		},
+	}
 
 	return rs
 }
 
-func passthroughResponses(rateLimited bool) map[string]*Response {
+// proxyResponses is used for a flow with exactly one upstream: it is not
+// aggregated (see Router.dispatch), so its answer is forwarded to the client
+// as-is rather than wrapped in a gateway shape. The 200 entry is necessarily
+// opaque - the gateway has no static knowledge of the upstream's schema,
+// only that *something* comes back unmodified.
+func proxyResponses(rateLimited bool) map[string]*Response {
+	rs := map[string]*Response{
+		"200": {
+			Description: "Upstream response forwarded as-is: status, headers, and body are exactly what the upstream returned. " +
+				"This also covers 3xx/4xx answers from the upstream - those are proxied verbatim too, not translated into gateway errors.",
+			Headers: stdHeaders(),
+			Content: map[string]MediaType{"*/*": {}},
+		},
+		"413": problemResponse("Request body exceeds the gateway limit."),
+		"502": problemResponse("Upstream unavailable, returned a server error, or failed gateway policy validation."),
+		"500": problemResponse("Internal gateway error."),
+	}
+
+	if rateLimited {
+		rs["429"] = problemResponse("Rate limit exceeded.")
+	}
+
+	return rs
+}
+
+func streamingResponses(rateLimited bool) map[string]*Response {
 	rs := map[string]*Response{
 		"200": {
 			Description: "Upstream response streamed as-is. The actual status code, headers, and body are those returned by the upstream.",
 			Headers:     stdHeaders(),
 			Content:     map[string]MediaType{"*/*": {}},
 		},
-		"502": envelopeResponse("Upstream unavailable before the response started streaming."),
-		"500": envelopeResponse("Internal gateway error."),
+		"502": problemResponse("Upstream unavailable before the response started streaming."),
+		"500": problemResponse("Internal gateway error."),
 	}
 
 	if rateLimited {
-		rs["429"] = envelopeResponse("Rate limit exceeded.")
+		rs["429"] = problemResponse("Rate limit exceeded.")
 	}
 
 	return rs
 }
 
-func envelopeResponse(desc string) *Response {
+// problemResponse describes a response that carries no upstream data at all -
+// an RFC 9457 Problem Details document (application/problem+json).
+func problemResponse(desc string) *Response {
 	return &Response{
 		Description: desc,
 		Headers:     stdHeaders(),
 		Content: map[string]MediaType{
-			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
+			"application/problem+json": {Schema: &Schema{Ref: schemaProblemDetails}},
 		},
 	}
 }
@@ -456,21 +506,49 @@ func stdHeaders() map[string]*Header {
 	}
 }
 
-func envelopeSchemas() map[string]*Schema {
+// partialHeaders is stdHeaders plus X-Partial-Errors, which only a 206
+// response carries.
+func partialHeaders() map[string]*Header {
+	h := stdHeaders()
+
+	h["X-Partial-Errors"] = &Header{
+		Description: "One value per failed upstream (a ClientError code, see the ClientError schema). Repeated when more than one upstream failed.",
+		Schema:      &Schema{Type: "string"},
+	}
+
+	return h
+}
+
+func problemSchemas() map[string]*Schema {
 	return map[string]*Schema{
-		"ClientResponse": {
-			Type:        "object",
-			Description: "Gateway response envelope.",
+		"ProblemDetails": {
+			Type: "object",
+			Description: "RFC 9457 Problem Details (application/problem+json). Returned only when there is no upstream " +
+				"data to report: every upstream failed, or the request was rejected before reaching one.",
 			Properties: map[string]*Schema{
-				"data": {
-					Type:        "object",
-					Description: "Aggregated upstream payload. Shape depends on the flow's upstreams and aggregation strategy.",
+				"type": {
+					Type: "string",
+					Description: "Always \"about:blank\" (RFC 9457 §4.2's own default). Deliberately never a real " +
+						"URI - see `errors` for the machine-readable cause instead.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Short, human-readable summary of the highest-priority entry in `errors`.",
+				},
+				"status": {
+					Type:        "integer",
+					Description: "HTTP status code, repeated here per RFC 9457.",
+				},
+				"detail": {
+					Type:        "string",
+					Description: "Occurrence-specific explanation, when there is one.",
 				},
 				"errors": {
-					Type:  "array",
+					Type: "array",
+					Description: "Every distinct ClientError behind this response - always at least one. More than " +
+						"one only for a multi-upstream failure where several upstreams failed differently.",
 					Items: &Schema{Ref: "#/components/schemas/ClientError"},
 				},
-				"meta": {Ref: "#/components/schemas/ResponseMeta"},
 			},
 		},
 		"ClientError": {
@@ -488,16 +566,6 @@ func envelopeSchemas() map[string]*Schema {
 				"ABORTED",
 				"UNAUTHORIZED",
 				"VALUE_CONFLICT",
-			},
-		},
-		"ResponseMeta": {
-			Type: "object",
-			Properties: map[string]*Schema{
-				"request_id": {Type: "string"},
-				"partial": {
-					Type:        "boolean",
-					Description: "True when the response was assembled from a subset of upstreams (HTTP 206).",
-				},
 			},
 		},
 	}
@@ -540,15 +608,15 @@ func unauthorizedResponse() *Response {
 			},
 		},
 		Content: map[string]MediaType{
-			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
+			"application/problem+json": {Schema: &Schema{Ref: schemaProblemDetails}},
 		},
 	}
 }
 
 func flowExtension(f aastro.FlowConfig) *FlowExtension {
 	ext := &FlowExtension{
-		Passthrough: f.Passthrough,
-		Upstreams:   make([]UpstreamExtension, 0, len(f.Upstreams)),
+		Streaming: f.Streaming,
+		Upstreams: make([]UpstreamExtension, 0, len(f.Upstreams)),
 	}
 
 	if f.Aggregation != nil {
@@ -601,7 +669,6 @@ func policyExtension(p aastro.PolicyConfig) *PolicyExtension {
 
 	ext := &PolicyExtension{
 		HeaderBlacklist:     p.HeaderBlacklist,
-		AllowedStatuses:     p.AllowedStatuses,
 		RequireBody:         p.RequireBody,
 		MaxResponseBodySize: p.MaxResponseBodySize,
 		FollowRedirects:     p.FollowRedirects,
@@ -639,86 +706,13 @@ func transportExtension(t aastro.TransportConfig) *TransportExtension {
 	}
 }
 
-func addPropagatedStatuses(rs map[string]*Response, f aastro.FlowConfig) {
-	allowed, open := allowedStatuses(f)
-
-	if len(f.Upstreams) == 1 && !open {
-		for _, status := range allowed {
-			key := strconv.Itoa(status)
-			if _, exists := rs[key]; exists {
-				continue
-			}
-
-			rs[key] = allowedStatusResponse(status)
-		}
-
-		return
-	}
-
-	if !open {
-		return
-	}
-
-	rs["default"] = &Response{
-		Description: propagationNote(len(f.Upstreams)),
-		Headers:     stdHeaders(),
-		Content: map[string]MediaType{
-			"application/json": {Schema: &Schema{Ref: schemaClientResponse}},
-		},
-	}
-}
-
-func allowedStatuses(f aastro.FlowConfig) (statuses []int, open bool) {
-	set := make(map[int]struct{})
-
-	for _, u := range f.Upstreams {
-		if len(u.Policy.AllowedStatuses) == 0 {
-			open = true
-			continue
-		}
-
-		for _, s := range u.Policy.AllowedStatuses {
-			set[s] = struct{}{}
-		}
-	}
-
-	statuses = make([]int, 0, len(set))
-	for s := range set {
-		statuses = append(statuses, s)
-	}
-
-	sort.Ints(statuses)
-
-	return statuses, open
-}
-
-func propagationNote(upstreamCount int) string {
-	if upstreamCount == 1 {
-		return "Upstream status propagated verbatim. A single-upstream flow acts as a proxy: " +
-			"redirects and client errors (3xx, 4xx) returned by the upstream reach the client unchanged, " +
-			"with the upstream body carried in `data` when it is valid JSON. " +
-			"Server errors and transport failures are reported as 502 instead."
-	}
-
+// propagationNote documents aggregateResponses's "default" entry, which is
+// only reached for a multi-upstream flow - a single-upstream flow is
+// documented by proxyResponses instead and never calls this.
+func propagationNote() string {
 	return "Upstream status propagated verbatim. When every failing upstream returns the same " +
 		"client error status (typically 401 or 403 from a shared auth layer), that status is " +
 		"forwarded instead of 502."
-}
-
-func allowedStatusResponse(status int) *Response {
-	if status == http.StatusNoContent || status == http.StatusNotModified {
-		return &Response{
-			Description: "Upstream returned " + strconv.Itoa(status) + "; no response body.",
-			Headers:     stdHeaders(),
-		}
-	}
-
-	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		return envelopeResponse("Successful response (upstream status " + strconv.Itoa(status) + ").")
-	}
-
-	return envelopeResponse("Upstream status " + strconv.Itoa(status) +
-		", declared acceptable via `allowed_statuses` and propagated to the client.")
 }
 
 func operationID(method, path string) string {

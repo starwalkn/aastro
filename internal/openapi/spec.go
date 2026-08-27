@@ -1,7 +1,7 @@
 // Package openapi generates OpenAPI 3.x documents from an aastro gateway
 // configuration. The package models only the subset of the specification
 // that the generator emits and has no dependencies outside the standard
-// library — serialization (YAML/JSON) is left to the caller (aastroctl).
+// library - serialization (YAML/JSON) is left to the caller (aastroctl).
 package openapi
 
 // Document is the root OpenAPI object.
@@ -110,7 +110,7 @@ type RootExtension struct {
 }
 
 type FlowExtension struct {
-	Passthrough bool                  `yaml:"passthrough,omitempty" json:"passthrough,omitempty"`
+	Streaming   bool                  `yaml:"streaming,omitempty"   json:"streaming,omitempty"`
 	Aggregation *AggregationExtension `yaml:"aggregation,omitempty" json:"aggregation,omitempty"`
 	Upstreams   []UpstreamExtension   `yaml:"upstreams"             json:"upstreams"`
 	Middlewares []string              `yaml:"middlewares,omitempty" json:"middlewares,omitempty"`
@@ -145,7 +145,6 @@ type UpstreamExtension struct {
 
 type PolicyExtension struct {
 	HeaderBlacklist     []string `yaml:"header_blacklist,omitempty"       json:"header_blacklist,omitempty"`
-	AllowedStatuses     []int    `yaml:"allowed_statuses,omitempty"       json:"allowed_statuses,omitempty"`
 	RequireBody         bool     `yaml:"require_body,omitempty"           json:"require_body,omitempty"`
 	MaxResponseBodySize int64    `yaml:"max_response_body_size,omitempty" json:"max_response_body_size,omitempty"`
 	FollowRedirects     bool     `yaml:"follow_redirects,omitempty"       json:"follow_redirects,omitempty"`

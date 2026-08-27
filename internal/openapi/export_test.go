@@ -36,12 +36,12 @@ func mergeFlow(path string, bestEffort bool, policy string, upstreams ...aastro.
 	return f
 }
 
-func passthroughFlow(path string) aastro.FlowConfig {
+func streamingFlow(path string) aastro.FlowConfig {
 	return aastro.FlowConfig{
-		Path:        path,
-		Method:      "GET",
-		Passthrough: true,
-		Upstreams:   []aastro.UpstreamConfig{minimalUpstream("stream")},
+		Path:      path,
+		Method:    "GET",
+		Streaming: true,
+		Upstreams: []aastro.UpstreamConfig{minimalUpstream("stream")},
 	}
 }
 
@@ -97,19 +97,19 @@ var _ = Describe("FromConfig", func() {
 		})
 
 		It("emits 3.0.3 when OASVersion is 3.0", func() {
-			doc, _ := generate(configWith(false, passthroughFlow("/s")), Options{OASVersion: "3.0"})
+			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{OASVersion: "3.0"})
 
 			Expect(doc.OpenAPI).To(Equal("3.0.3"))
 		})
 
 		It("rejects unsupported OAS versions", func() {
-			_, _, err := FromConfig(configWith(false, passthroughFlow("/s")), Options{OASVersion: "2.0"})
+			_, _, err := FromConfig(configWith(false, streamingFlow("/s")), Options{OASVersion: "2.0"})
 
 			Expect(err).To(MatchError(ContainSubstring("unsupported OpenAPI version")))
 		})
 
 		It("stamps the generator version into the root extension", func() {
-			doc, _ := generate(configWith(false, passthroughFlow("/s")), Options{GeneratorVersion: "0.7.0"})
+			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{GeneratorVersion: "0.7.0"})
 
 			Expect(doc.XAastro).NotTo(BeNil())
 			Expect(doc.XAastro.Schema).To(Equal("v1"))
@@ -129,7 +129,7 @@ var _ = Describe("FromConfig", func() {
 		It("is deterministic across invocations", func() {
 			cfg := configWith(true,
 				mergeFlow("/a/{id}", true, "error", minimalUpstream("u1"), minimalUpstream("u2")),
-				passthroughFlow("/s"),
+				streamingFlow("/s"),
 			)
 
 			first, _ := generate(cfg, Options{Extensions: true})
@@ -140,7 +140,20 @@ var _ = Describe("FromConfig", func() {
 	})
 
 	Describe("response derivation", func() {
-		It("always includes the base envelope statuses", func() {
+		It("always includes the base envelope statuses for a multi-upstream flow", func() {
+			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u1"), minimalUpstream("u2"))), Options{})
+
+			responses := doc.Paths["/a"].Get.Responses
+			Expect(responses).To(HaveKey("200"))
+			Expect(responses).To(HaveKey("413"))
+			Expect(responses).To(HaveKey("500"))
+			Expect(responses).To(HaveKey("502"))
+			Expect(responses["200"].Content).To(HaveKey("application/json"))
+			Expect(responses["200"].Content["application/json"].Schema).To(BeNil())
+			Expect(responses["502"].Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
+		})
+
+		It("documents a single-upstream flow as an opaque proxy, not the envelope", func() {
 			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
 
 			responses := doc.Paths["/a"].Get.Responses
@@ -148,7 +161,11 @@ var _ = Describe("FromConfig", func() {
 			Expect(responses).To(HaveKey("413"))
 			Expect(responses).To(HaveKey("500"))
 			Expect(responses).To(HaveKey("502"))
-			Expect(responses["200"].Content["application/json"].Schema.Ref).To(Equal(schemaClientResponse))
+			Expect(responses).NotTo(HaveKey("default"))
+
+			Expect(responses["200"].Content).To(HaveKey("*/*"))
+			Expect(responses["200"].Content["*/*"].Schema).To(BeNil())
+			Expect(responses["502"].Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
 		})
 
 		DescribeTable("206 appears only for best-effort multi-upstream flows",
@@ -171,6 +188,15 @@ var _ = Describe("FromConfig", func() {
 			Entry("strict with two upstreams", false, 2, false),
 		)
 
+		It("documents X-Partial-Errors only on the 206 response", func() {
+			doc, _ := generate(configWith(false, mergeFlow("/a", true, "", minimalUpstream("u1"), minimalUpstream("u2"))), Options{})
+
+			responses := doc.Paths["/a"].Get.Responses
+			Expect(responses["206"].Headers).To(HaveKey("X-Partial-Errors"))
+			Expect(responses["206"].Content["application/json"].Schema).To(BeNil())
+			Expect(responses["200"].Headers).NotTo(HaveKey("X-Partial-Errors"))
+		})
+
 		DescribeTable("409 appears only under on_conflict: error",
 			func(policy string, want bool) {
 				doc, _ := generate(
@@ -190,8 +216,8 @@ var _ = Describe("FromConfig", func() {
 		)
 
 		It("ties 429 to the rate limiter for both flow kinds", func() {
-			limited, _ := generate(configWith(true, mergeFlow("/a", false, "", minimalUpstream("u")), passthroughFlow("/s")), Options{})
-			unlimited, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u")), passthroughFlow("/s")), Options{})
+			limited, _ := generate(configWith(true, mergeFlow("/a", false, "", minimalUpstream("u")), streamingFlow("/s")), Options{})
+			unlimited, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u")), streamingFlow("/s")), Options{})
 
 			Expect(limited.Paths["/a"].Get.Responses).To(HaveKey("429"))
 			Expect(limited.Paths["/s"].Get.Responses).To(HaveKey("429"))
@@ -199,8 +225,8 @@ var _ = Describe("FromConfig", func() {
 			Expect(unlimited.Paths["/s"].Get.Responses).NotTo(HaveKey("429"))
 		})
 
-		It("models passthrough as streamed */* without 413", func() {
-			doc, _ := generate(configWith(false, passthroughFlow("/s")), Options{})
+		It("models streaming as streamed */* without 413", func() {
+			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{})
 
 			responses := doc.Paths["/s"].Get.Responses
 			Expect(responses).To(HaveKey("200"))
@@ -220,28 +246,10 @@ var _ = Describe("FromConfig", func() {
 			Expect(doc.Paths["/b"].Get.RequestBody).To(BeNil())
 		})
 
-		It("documents verbatim propagation for a single upstream with no allowed_statuses", func() {
+		It("notes proxy semantics in the description for a single upstream", func() {
 			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
 
-			responses := doc.Paths["/a"].Get.Responses
-			Expect(responses).To(HaveKey("default"))
-			Expect(responses["default"].Description).To(ContainSubstring("acts as a proxy"))
-		})
-
-		It("enumerates allowed statuses instead of default when the contract is closed", func() {
-			u := minimalUpstream("u")
-			u.Policy.AllowedStatuses = []int{200, 204, 404}
-
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", u)), Options{})
-
-			responses := doc.Paths["/a"].Get.Responses
-			Expect(responses).NotTo(HaveKey("default"))
-			Expect(responses).To(HaveKey("404"))
-			Expect(responses).To(HaveKey("204"))
-
-			// 204 cannot carry a body
-			Expect(responses["204"].Content).To(BeEmpty())
-			Expect(responses["404"].Content).To(HaveKey("application/json"))
+			Expect(doc.Paths["/a"].Get.Description).To(ContainSubstring("Proxy flow"))
 		})
 
 		It("describes the shared-status rule for multi-upstream flows", func() {
@@ -251,16 +259,6 @@ var _ = Describe("FromConfig", func() {
 			)
 
 			Expect(doc.Paths["/a"].Get.Responses["default"].Description).To(ContainSubstring("every failing upstream"))
-		})
-
-		It("omits default when every upstream closes its status contract", func() {
-			u1, u2 := minimalUpstream("u1"), minimalUpstream("u2")
-			u1.Policy.AllowedStatuses = []int{200}
-			u2.Policy.AllowedStatuses = []int{200}
-
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", u1, u2)), Options{})
-
-			Expect(doc.Paths["/a"].Get.Responses).NotTo(HaveKey("default"))
 		})
 	})
 
@@ -295,7 +293,7 @@ var _ = Describe("FromConfig", func() {
 			resp := doc.Paths["/secured"].Get.Responses["401"]
 			Expect(resp.Headers).To(HaveLen(1))
 			Expect(resp.Headers).To(HaveKey("WWW-Authenticate"))
-			Expect(resp.Content["application/json"].Schema.Ref).To(Equal(schemaClientResponse))
+			Expect(resp.Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
 		})
 
 		It("omits the security scheme when no flow uses auth", func() {
@@ -450,13 +448,13 @@ var _ = Describe("FromConfig", func() {
 	})
 
 	Describe("components", func() {
-		It("emits envelope schemas even for passthrough-only configs", func() {
-			doc, _ := generate(configWith(false, passthroughFlow("/s")), Options{})
+		It("emits problem detail schemas even for streaming-only configs", func() {
+			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{})
 
 			Expect(doc.Components).NotTo(BeNil())
-			Expect(doc.Components.Schemas).To(HaveKey("ClientResponse"))
+			Expect(doc.Components.Schemas).To(HaveKey("ProblemDetails"))
 			Expect(doc.Components.Schemas).To(HaveKey("ClientError"))
-			Expect(doc.Components.Schemas).To(HaveKey("ResponseMeta"))
+			Expect(doc.Components.Schemas).NotTo(HaveKey("ClientResponse"))
 		})
 	})
 })
@@ -476,8 +474,7 @@ var _ = Describe("operationID", func() {
 var _ = Describe("authNote", func() {
 	DescribeTable("describes token requirements from non-secret fields",
 		func(cfg map[string]interface{}, want string) {
-			m := authMiddlewareConfig(cfg)
-			Expect(authNote(&m)).To(Equal(want))
+			Expect(authNote(new(authMiddlewareConfig(cfg)))).To(Equal(want))
 		},
 		Entry("issuer and audience", map[string]interface{}{"issuer": "https://idp", "audience": "api"},
 			"Requires a JWT issued by `https://idp` for audience `api`."),

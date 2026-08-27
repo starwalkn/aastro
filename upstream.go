@@ -42,44 +42,6 @@ type upstreamResponse struct {
 	err     *upstreamError
 }
 
-type upstreamError struct {
-	kind upstreamErrorKind
-	err  error
-}
-
-func (ue *upstreamError) Error() string { return string(ue.kind) }
-func (ue *upstreamError) Unwrap() error {
-	if ue == nil {
-		return nil
-	}
-
-	return ue.err
-}
-
-type upstreamErrorKind string
-
-const (
-	upstreamTimeout         upstreamErrorKind = "timeout"
-	upstreamCanceled        upstreamErrorKind = "canceled"
-	upstreamConnection      upstreamErrorKind = "connection"
-	upstreamRedirect        upstreamErrorKind = "redirect"     // 3XX
-	upstreamClientError     upstreamErrorKind = "client_error" // 4XX
-	upstreamBadStatus       upstreamErrorKind = "bad_status"   // 5XX
-	upstreamReadError       upstreamErrorKind = "read_error"
-	upstreamBodyTooLarge    upstreamErrorKind = "body_too_large"
-	upstreamCircuitOpen     upstreamErrorKind = "circuit_open"
-	upstreamInternal        upstreamErrorKind = "internal"
-	upstreamPolicyViolation upstreamErrorKind = "policy_violation"
-)
-
-type breakerOutcome uint8
-
-const (
-	breakerNoSignal breakerOutcome = iota
-	breakerSuccess
-	breakerFailure
-)
-
 type httpUpstream struct {
 	cfg            upstreamConfig
 	state          upstreamState
@@ -127,7 +89,7 @@ func (u *httpUpstream) call(ctx context.Context, original *http.Request, origina
 	u.updateCircuitBreaker(resp, log)
 
 	// Policy is applied after the circuit breaker update intentionally:
-	// a misconfigured allowedStatuses or requireBody should not cause the breaker to open.
+	// a misconfigured requireBody should not cause the breaker to open.
 	u.applyPolicy(ctx, resp)
 
 	return resp
@@ -135,6 +97,16 @@ func (u *httpUpstream) call(ctx context.Context, original *http.Request, origina
 
 func (u *httpUpstream) callWithRetry(ctx context.Context, original *http.Request, originalBody []byte, log *zap.Logger) *upstreamResponse {
 	retry := u.cfg.policy.retry
+
+	// Same fallback as newRequest/proxy: an unset upstream method means
+	// "use the flow's own method". shouldRetry must judge idempotency
+	// against that effective method, not the raw (possibly empty) config
+	// value - otherwise retries never fire for the common case of an
+	// upstream that doesn't override the method.
+	method := u.cfg.method
+	if method == "" {
+		method = original.Method
+	}
 
 	var resp *upstreamResponse
 
@@ -167,7 +139,7 @@ func (u *httpUpstream) callWithRetry(ctx context.Context, original *http.Request
 
 		resp = u.doCall(ctx, original, originalBody, log)
 
-		if attempt == retry.maxRetries || !u.shouldRetry(u.cfg.method, resp, retry) {
+		if attempt == retry.maxRetries || !u.shouldRetry(method, resp, retry) {
 			break
 		}
 
@@ -188,20 +160,20 @@ func (u *httpUpstream) shouldRetry(method string, resp *upstreamResponse, retry 
 		return false
 	}
 
-	if resp.err != nil {
-		switch resp.err.kind {
-		case upstreamTimeout, upstreamConnection:
-			return true
-		case upstreamBadStatus, upstreamClientError:
-			return slices.Contains(retry.retryOnStatuses, resp.status)
-		case upstreamCanceled, upstreamReadError, upstreamBodyTooLarge, upstreamCircuitOpen,
-			upstreamInternal, upstreamPolicyViolation, upstreamRedirect:
-
-			return false
-		}
+	if resp.err == nil {
+		return slices.Contains(retry.retryOnStatuses, resp.status)
 	}
 
-	return slices.Contains(retry.retryOnStatuses, resp.status)
+	switch resp.err.kind.props().retry {
+	case retryAlways:
+		return true
+	case retryByStatus:
+		return slices.Contains(retry.retryOnStatuses, resp.status)
+	case retryNever:
+		return false
+	default:
+		return false
+	}
 }
 
 func isIdempotent(method string) bool {
@@ -225,7 +197,7 @@ func (u *httpUpstream) updateCircuitBreaker(resp *upstreamResponse, log *zap.Log
 	case breakerSuccess:
 		u.circuitBreaker.OnSuccess()
 	case breakerNoSignal:
-		// The request never reached the upstream — denied by the breaker itself,
+		// The request never reached the upstream - denied by the breaker itself,
 		// canceled by the client, or never built. Recording success here would
 		// let an open breaker reset itself with the very request it rejected.
 	}
@@ -246,10 +218,6 @@ func (u *httpUpstream) applyPolicy(ctx context.Context, resp *upstreamResponse) 
 		errs = append(errs, errors.New("empty body not allowed by upstream policy"))
 	}
 
-	if len(u.cfg.policy.allowedStatuses) > 0 && !slices.Contains(u.cfg.policy.allowedStatuses, resp.status) {
-		errs = append(errs, fmt.Errorf("status %d not in allowed list", resp.status))
-	}
-
 	if len(errs) == 0 {
 		return
 	}
@@ -262,9 +230,8 @@ func (u *httpUpstream) applyPolicy(ctx context.Context, resp *upstreamResponse) 
 	case resp.err == nil:
 		resp.err = &upstreamError{kind: upstreamPolicyViolation, err: combined}
 	case resp.err.kind == upstreamClientError, resp.err.kind == upstreamRedirect:
-		// An explicit allowed_statuses list is a contract. A status outside it is a
-		// broken upstream, not an answer worth forwarding — so the propagatable
-		// kinds are downgraded to a policy violation (502)
+		// A policy violation on top of an otherwise-propagatable client error/redirect
+		// means the response isn't worth forwarding - downgrade to a policy violation (502).
 		resp.err = &upstreamError{
 			kind: upstreamPolicyViolation,
 			err:  errors.Join(resp.err.err, combined),
@@ -272,19 +239,6 @@ func (u *httpUpstream) applyPolicy(ctx context.Context, resp *upstreamResponse) 
 	default:
 		// 5xx keeps bad_status: it must keep feeding the circuit breaker
 		resp.err.err = errors.Join(resp.err.err, combined)
-	}
-}
-
-func isStatusFailure(kind upstreamErrorKind) bool {
-	switch kind {
-	case upstreamBadStatus, upstreamClientError, upstreamRedirect:
-		return true
-	case upstreamTimeout, upstreamCanceled, upstreamConnection, upstreamReadError,
-		upstreamBodyTooLarge, upstreamCircuitOpen, upstreamInternal, upstreamPolicyViolation:
-
-		return false
-	default:
-		return false
 	}
 }
 
@@ -369,7 +323,7 @@ func (u *httpUpstream) readBody(ctx context.Context, body io.ReadCloser, log *za
 
 		// Read one byte past the limit: LimitReader signals exhaustion with io.EOF,
 		// which ReadAll reports as success. The extra byte is the only way to tell
-		// "body ended" from "body was truncated" — see the length check below
+		// "body ended" from "body was truncated" - see the length check below
 		reader = io.LimitReader(reader, u.cfg.policy.maxResponseBodySize+1)
 	}
 
@@ -408,10 +362,6 @@ func (u *httpUpstream) filterHeaders(headers http.Header) http.Header {
 }
 
 func (u *httpUpstream) classifyStatus(status int) (upstreamErrorKind, bool) {
-	if slices.Contains(u.cfg.policy.allowedStatuses, status) {
-		return "", false
-	}
-
 	switch {
 	case status >= http.StatusInternalServerError:
 		return upstreamBadStatus, true
@@ -432,27 +382,6 @@ func (u *httpUpstream) classifyDoError(err error) upstreamErrorKind {
 		return upstreamCanceled
 	default:
 		return upstreamConnection
-	}
-}
-
-// breakerOutcomeFor answers one question: what does this result say about the
-// upstream's health? A complete HTTP response - whatever its status - proves
-// the upstream is alive; a transport failure proves it is not; anything that
-// never left the gateway proves nothing.
-func breakerOutcomeFor(uerr *upstreamError) breakerOutcome {
-	if uerr == nil {
-		return breakerSuccess
-	}
-
-	switch uerr.kind {
-	case upstreamTimeout, upstreamConnection, upstreamBadStatus, upstreamReadError:
-		return breakerFailure
-	case upstreamClientError, upstreamRedirect, upstreamPolicyViolation, upstreamBodyTooLarge:
-		return breakerSuccess
-	case upstreamCircuitOpen, upstreamCanceled, upstreamInternal:
-		return breakerNoSignal
-	default:
-		return breakerNoSignal
 	}
 }
 
@@ -702,7 +631,7 @@ func isValidPort(p string) bool {
 	return err == nil && n >= 1 && n <= 65535
 }
 
-// proxy implements proxyCapable for streaming passthrough flows.
+// proxy implements proxyCapable for streaming flows.
 func (u *httpUpstream) proxy(ctx context.Context, w http.ResponseWriter, original *http.Request) error {
 	selectedHost := u.selectHost(u.log)
 	host := u.cfg.hosts[selectedHost]
@@ -745,7 +674,7 @@ func (u *httpUpstream) proxy(ctx context.Context, w http.ResponseWriter, origina
 	resp, err := u.streamClient.Do(req) // #nosec G704
 	if err != nil {
 		span.RecordError(err)
-		span.SetStatus(codes.Error, "passthrough upstream call failed")
+		span.SetStatus(codes.Error, "streaming upstream call failed")
 
 		return fmt.Errorf("upstream call: %w", err)
 	}
@@ -771,7 +700,7 @@ func (u *httpUpstream) proxy(ctx context.Context, w http.ResponseWriter, origina
 
 	if err = streamCopy(w, resp.Body); err != nil {
 		if errors.Is(err, context.Canceled) {
-			span.SetAttributes(attribute.String("aastro.passthrough.end_reason", "client_disconnect"))
+			span.SetAttributes(attribute.String("aastro.streaming.end_reason", "client_disconnect"))
 			return nil
 		}
 

@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/starwalkn/aastro"
 	"github.com/starwalkn/aastro/internal/logger"
 	"github.com/starwalkn/aastro/sdk"
 )
@@ -67,9 +68,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 					log.Error(msg)
 				}
 
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"errors":[{"code":"INTERNAL"}]}`))
+				aastro.WriteError(w, aastro.ClientErrInternal, http.StatusInternalServerError)
 			}
 		}()
 

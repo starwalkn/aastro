@@ -51,11 +51,11 @@ func (tw *trackingWriter) Flush() {
 	}
 }
 
-// handlePassthrough streams a request directly to the single upstream without buffering,
+// handleStreaming streams a request directly to the single upstream without buffering,
 // enabling SSE and chunked transfer. Request plugins still run.
-func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *flow, log *zap.Logger) {
+func (r *Router) handleStreaming(w http.ResponseWriter, req *http.Request, f *flow, log *zap.Logger) {
 	if len(f.upstreams) != 1 {
-		log.Error("passthrough flow must have exactly one upstream",
+		log.Error("streaming flow must have exactly one upstream",
 			zap.Int("configured", len(f.upstreams)),
 		)
 		WriteError(w, ClientErrInternal, http.StatusInternalServerError)
@@ -67,7 +67,7 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 
 	proxy, ok := u.(proxyCapable)
 	if !ok {
-		log.Error("upstream does not support passthrough (does not implement proxyCapable)",
+		log.Error("upstream does not support streaming (does not implement proxyCapable)",
 			zap.String("upstream", u.name()),
 		)
 		WriteError(w, ClientErrInternal, http.StatusInternalServerError)
@@ -77,10 +77,10 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-		log.Warn("cannot disable write deadline for passthrough", zap.Error(err))
+		log.Warn("cannot disable write deadline for streaming", zap.Error(err))
 	}
 	if err := rc.SetReadDeadline(time.Time{}); err != nil {
-		log.Warn("cannot disable read deadline for passthrough", zap.Error(err))
+		log.Warn("cannot disable read deadline for streaming", zap.Error(err))
 	}
 
 	actx := newContext(req)
@@ -94,7 +94,7 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
 			attribute.String("aastro.upstream.name", u.name()),
-			attribute.String("aastro.upstream.mode", "passthrough"),
+			attribute.String("aastro.upstream.mode", "streaming"),
 			attribute.String("aastro.flow.path", f.path),
 		),
 	)
@@ -105,13 +105,13 @@ func (r *Router) handlePassthrough(w http.ResponseWriter, req *http.Request, f *
 	err := proxy.proxy(ctx, tw, actx.Request())
 	if err != nil {
 		span.RecordError(err)
-		span.SetStatus(codes.Error, "passthrough upstream error")
+		span.SetStatus(codes.Error, "streaming upstream error")
 
 		if !tw.written {
 			WriteError(w, ClientErrUpstreamUnavailable, http.StatusBadGateway)
 		}
 
-		log.Error("passthrough upstream error", zap.Error(err))
+		log.Error("streaming upstream error", zap.Error(err))
 	}
 
 	if tw.statusCode != 0 {

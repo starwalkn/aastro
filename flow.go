@@ -5,18 +5,23 @@ import (
 )
 
 type flow struct {
-	path        string
-	method      string
+	path   string
+	method string
+
+	// aggregation is only read when len(upstreams) > 1 - a single-upstream
+	// flow is proxied directly (Router.buildProxyResponse) and never
+	// aggregates, streaming or not. See Router.dispatch.
 	aggregation aggregation
 	upstreams   []upstream
 
 	plugins     []sdk.Plugin
 	middlewares []sdk.Middleware
 
-	// passthrough enables unbuffered streaming proxy mode.
-	// When true: only one upstream is allowed, aggregation is skipped,
-	// and the response body is piped directly to the client (SSE-safe).
-	passthrough bool
+	// streaming enables unbuffered proxy mode.
+	// When true: only one upstream is allowed, aggregation is skipped, and
+	// the response body is piped directly to the client (SSE-safe) - request
+	// plugins still run, but response plugins do not (see handleStreaming).
+	streaming bool
 }
 
 type aggregation struct {

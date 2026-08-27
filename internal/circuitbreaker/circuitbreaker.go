@@ -80,7 +80,7 @@ func (b *CircuitBreaker) OnFailure() {
 			b.state = Open
 		}
 	case Open:
-		// Already open — lastFailureAt is updated above, nothing else to do.
+		// Already open - lastFailureAt is updated above, nothing else to do.
 	}
 }
 
@@ -95,7 +95,7 @@ func (b *CircuitBreaker) OnSuccess() {
 	case Closed:
 		b.failures = 0
 	case Open:
-		// Success while open shouldn't happen — Allow() returns false for Open state.
+		// Success while open shouldn't happen - Allow() returns false for Open state.
 	}
 }
 

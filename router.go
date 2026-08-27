@@ -30,6 +30,12 @@ import (
 	"github.com/starwalkn/aastro/sdk"
 )
 
+// Keys must be net/textproto's canonical form (net/http always stores and
+// iterates response headers that way) - "TE" is the one entry here that
+// doesn't look canonical at a glance: textproto.CanonicalMIMEHeaderKey("TE")
+// is "Te" (no hyphen to separate words, so only the first letter is upper-cased),
+// not "TE". Written any other way, this lookup silently never
+// matches and the header leaks to the client.
 var hopByHopHeaders = map[string]struct{}{
 	"Content-Length":      {},
 	"Transfer-Encoding":   {},
@@ -38,7 +44,7 @@ var hopByHopHeaders = map[string]struct{}{
 	"Keep-Alive":          {},
 	"Proxy-Authenticate":  {},
 	"Proxy-Authorization": {},
-	"TE":                  {},
+	"Te":                  {},
 	"Upgrade":             {},
 }
 
@@ -72,17 +78,27 @@ type Router struct {
 }
 
 // ServeHTTP handles incoming HTTP requests through the full router pipeline:
-//  1. Rate limiting — rejects requests exceeding the configured limit.
-//  2. Flow matching — chi router finds the flow by method and path (404 if none).
-//  3. Middleware execution — per-flow middlewares wrap the handler.
-//  4. Request plugins — run before upstream scatter; may modify the request.
-//  5. Upstream scatter — fan-out to all configured upstreams.
-//  6. Response aggregation — merge/array/namespace strategies with bestEffort support.
-//  7. Response plugins — run after aggregation; may modify headers or body.
-//  8. Response writing — status, headers, and JSON body sent to the client.
+//  1. Rate limiting - rejects requests exceeding the configured limit.
+//  2. Flow matching - chi router finds the flow by method and path (404 if none).
+//  3. Middleware execution - per-flow middlewares wrap the handler.
+//  4. Request plugins - run before the upstream call; may modify the request.
+//  5. Upstream dispatch - a streaming flow is piped through unbuffered
+//     (handleStreaming); a single-upstream flow is called directly and its
+//     status/headers/body are proxied as-is (buildProxyResponse); a
+//     multi-upstream flow fans out and aggregates (merge/array/namespace,
+//     with bestEffort support).
+//  6. Response plugins - run after dispatch; may modify headers or body.
+//  7. Response writing - status, headers, and body sent to the client.
 //
-// Status codes: 200 on full success, 206 on partial (bestEffort), 502/500 on failure.
-// Every response carries an X-Request-ID header and a JSON body with data/errors fields.
+// A single-upstream flow forwards the upstream's own status/body verbatim on
+// success or on a client error/redirect. A multi-upstream flow's success or
+// partial-success (206, bestEffort) body is the aggregated data itself, with
+// no gateway-added wrapper - a client never has to unwrap a response to get
+// at the payload. Only a response with no data at all (a hard failure with
+// nothing to aggregate, a rejected request that never reached an upstream)
+// is a body, and that body is an RFC 9457 Problem Details document
+// (application/problem+json), not a bespoke shape. Status codes: 200 on full
+// success, 206 on partial, 502/500 on failure.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.metrics.IncRequestsInFlight()
 	defer r.metrics.DecRequestsInFlight()
@@ -171,8 +187,8 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 			zap.String("fingerprint", fingerprint),
 		)
 
-		if f.passthrough {
-			r.handlePassthrough(w, req, f, log)
+		if f.streaming {
+			r.handleStreaming(w, req, f, log)
 			return
 		}
 
@@ -182,32 +198,10 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 			return
 		}
 
-		upstreamResponses := r.scatter.scatter(f, req)
-		if upstreamResponses == nil {
-			r.log.Error("request body too large", zap.Int("max_body_size", maxBodySize))
-			WriteError(w, ClientErrPayloadTooLarge, http.StatusRequestEntityTooLarge)
-
+		httpResp, ok := r.dispatch(w, req, f, log)
+		if !ok {
 			return
 		}
-
-		if r.log.Core().Enabled(zap.DebugLevel) {
-			var ok, failed int
-
-			for _, resp := range upstreamResponses {
-				if resp.err != nil {
-					failed++
-				} else {
-					ok++
-				}
-			}
-
-			r.log.Debug("scatter finished",
-				zap.Int("ok", ok),
-				zap.Int("failed", failed),
-			)
-		}
-
-		httpResp := r.buildResponse(req.Context(), upstreamResponses, f, log)
 		defer func() { _ = httpResp.Body.Close() }()
 
 		actx.SetResponse(httpResp)
@@ -240,7 +234,7 @@ func (r *Router) newFlowHandler(f *flow) http.Handler {
 }
 
 // executePlugins runs all plugins of the given type in order.
-// On the first plugin error it writes a 500 to w and returns false —
+// On the first plugin error it writes a 500 to w and returns false -
 // the caller must treat false as "response already sent, stop processing".
 func (r *Router) executePlugins(pluginType sdk.PluginType, w http.ResponseWriter, actx sdk.Context, f *flow, log *zap.Logger) bool {
 	tracer := otel.Tracer(tracing.TracerName)
@@ -284,6 +278,111 @@ func (r *Router) executePlugins(pluginType sdk.PluginType, w http.ResponseWriter
 	return true
 }
 
+// dispatch calls the flow's upstream(s) and builds the resulting HTTP
+// response. A single-upstream flow bypasses the scatter/aggregate machinery
+// entirely and is proxied directly (buildProxyResponse); a multi-upstream
+// flow fans out and aggregates as before (buildResponse). Returns ok=false
+// when it has already written an error response to w - the caller must
+// treat that as "response already sent, stop processing".
+func (r *Router) dispatch(w http.ResponseWriter, req *http.Request, f *flow, log *zap.Logger) (*http.Response, bool) {
+	if len(f.upstreams) == 1 {
+		resp, ok := r.scatter.call(f, req)
+		if !ok {
+			r.log.Error("request body too large", zap.Int("max_body_size", maxBodySize))
+			WriteError(w, ClientErrPayloadTooLarge, http.StatusRequestEntityTooLarge)
+
+			return nil, false
+		}
+
+		return r.buildProxyResponse(req.Context(), resp, log), true
+	}
+
+	upstreamResponses := r.scatter.scatter(f, req)
+	if upstreamResponses == nil {
+		r.log.Error("request body too large", zap.Int("max_body_size", maxBodySize))
+		WriteError(w, ClientErrPayloadTooLarge, http.StatusRequestEntityTooLarge)
+
+		return nil, false
+	}
+
+	if r.log.Core().Enabled(zap.DebugLevel) {
+		var ok, failed int
+
+		for _, resp := range upstreamResponses {
+			if resp.err != nil {
+				failed++
+			} else {
+				ok++
+			}
+		}
+
+		r.log.Debug("scatter finished",
+			zap.Int("ok", ok),
+			zap.Int("failed", failed),
+		)
+	}
+
+	return r.buildResponse(req.Context(), upstreamResponses, f, log), true
+}
+
+// buildProxyResponse builds the HTTP response for a single-upstream flow.
+// A success or a client-error/redirect answer from the upstream (its status,
+// headers, and body) is forwarded to the client as-is. Any other failure -
+// the upstream never answered, answered with a 5xx, or failed gateway
+// policy - has no upstream body worth forwarding and is reported as an
+// RFC 9457 Problem Details document instead.
+func (r *Router) buildProxyResponse(ctx context.Context, resp upstreamResponse, log *zap.Logger) *http.Response {
+	requestID := requestIDFromContext(ctx)
+	fingerprint := fingerprintFromContext(ctx)
+
+	headers := resp.headers
+	if headers == nil {
+		headers = make(http.Header)
+	}
+
+	headers.Set("X-Request-ID", requestID)
+	headers.Set("X-Request-Fingerprint", fingerprint)
+
+	if resp.err == nil || isPropagatable(resp.err.kind) {
+		if headers.Get("Content-Type") == "" {
+			headers.Set("Content-Type", "application/json; charset=utf-8")
+		}
+
+		log.Debug("proxying upstream response",
+			zap.Int("status", resp.status),
+			zap.Int("body_bytes", len(resp.body)),
+		)
+
+		return &http.Response{
+			Status:        fmt.Sprintf("%d %s", resp.status, http.StatusText(resp.status)),
+			StatusCode:    resp.status,
+			ContentLength: int64(len(resp.body)),
+			Body:          io.NopCloser(bytes.NewReader(resp.body)),
+			Header:        headers,
+		}
+	}
+
+	clientErr := mapUpstreamError(resp.err)
+	status := r.statusFromErrors([]ClientError{clientErr}, false)
+
+	log.Warn("upstream error, returning a problem details response",
+		zap.String("upstream_error", resp.err.Unwrap().Error()),
+		zap.String("client_error", clientErr.String()),
+	)
+
+	headers.Set("Content-Type", "application/problem+json")
+
+	body := mustMarshal(problemForErrors([]ClientError{clientErr}, status))
+
+	return &http.Response{
+		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		StatusCode:    status,
+		ContentLength: int64(len(body)),
+		Body:          io.NopCloser(bytes.NewBuffer(body)),
+		Header:        headers,
+	}
+}
+
 func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstreamResponse, f *flow, log *zap.Logger) *http.Response {
 	aggregated := r.aggregator.aggregate(f.upstreams, upstreamResponses, f.aggregation, log.Named("aggregated"))
 
@@ -297,7 +396,6 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 
 	headers.Set("X-Request-ID", requestID)
 	headers.Set("X-Request-Fingerprint", fingerprint)
-	headers.Set("Content-Type", "application/json; charset=utf-8")
 
 	log.Debug("aggregation finished",
 		zap.String("strategy", f.aggregation.strategy.String()),
@@ -307,7 +405,7 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 	)
 
 	status := r.resolveStatus(aggregated)
-	body := r.buildResponseBody(aggregated, requestID, status)
+	body := r.buildResponseBody(headers, aggregated, status)
 
 	return &http.Response{
 		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
@@ -318,41 +416,34 @@ func (r *Router) buildResponse(ctx context.Context, upstreamResponses []upstream
 	}
 }
 
-func (r *Router) buildResponseBody(aggregated aggregatedResponse, requestID string, status int) []byte {
+// buildResponseBody sets the outgoing Content-Type on headers and returns
+// the body. A full failure (no upstream produced anything) is reported as
+// an RFC 9457 Problem Details document; a full or partial success returns
+// the aggregated data verbatim, with the same shape either way - which
+// upstreams failed on a partial success goes on the X-Partial-Errors
+// header (one value per failure) instead of a body field, so a client never
+// has to branch on response shape depending on whether every upstream
+// happened to succeed.
+func (r *Router) buildResponseBody(headers http.Header, aggregated aggregatedResponse, status int) []byte {
 	// RFC 9110
 	if status == http.StatusNoContent || status == http.StatusNotModified {
 		return nil
 	}
 
-	switch {
-	case len(aggregated.errors) > 0 && !aggregated.partial:
-		return mustMarshal(ClientResponse{
-			Data:   nil,
-			Errors: aggregated.errors,
-			Meta: ResponseMeta{
-				RequestID: requestID,
-				Partial:   false,
-			},
-		})
-	case aggregated.partial:
-		return mustMarshal(ClientResponse{
-			Data:   aggregated.data,
-			Errors: aggregated.errors,
-			Meta: ResponseMeta{
-				RequestID: requestID,
-				Partial:   true,
-			},
-		})
-	default:
-		return mustMarshal(ClientResponse{
-			Data:   aggregated.data,
-			Errors: nil,
-			Meta: ResponseMeta{
-				RequestID: requestID,
-				Partial:   false,
-			},
-		})
+	if len(aggregated.errors) > 0 && !aggregated.partial {
+		headers.Set("Content-Type", "application/problem+json")
+		return mustMarshal(problemForErrors(aggregated.errors, status))
 	}
+
+	headers.Set("Content-Type", "application/json; charset=utf-8")
+
+	if aggregated.partial {
+		for _, e := range aggregated.errors {
+			headers.Add("X-Partial-Errors", e.String())
+		}
+	}
+
+	return aggregated.data
 }
 
 func (r *Router) copyResponse(w http.ResponseWriter, resp *http.Response) {
@@ -396,6 +487,16 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 		return http.StatusOK
 	}
 
+	return statusForError(selectPrimaryError(errors))
+}
+
+// ── Package-level helpers ─────────────────────────────────────────────────────
+
+// selectPrimaryError picks the single most specific error out of a set,
+// by priority (see errorPriority) - used both for the HTTP status (below)
+// and for a multi-error Problem Details document's Type/Title (problemForErrors),
+// so the two always agree on which failure is "the" failure.
+func selectPrimaryError(errors []ClientError) ClientError {
 	var selected ClientError
 
 	maxPriority := -1
@@ -407,7 +508,11 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 		}
 	}
 
-	switch selected {
+	return selected
+}
+
+func statusForError(e ClientError) int {
+	switch e {
 	case ClientErrRateLimitExceeded:
 		return http.StatusTooManyRequests
 	case ClientErrPayloadTooLarge:
@@ -431,12 +536,24 @@ func (r *Router) statusFromErrors(errors []ClientError, partial bool) int {
 	return http.StatusInternalServerError
 }
 
-// ── Package-level helpers ─────────────────────────────────────────────────────
+// problemForErrors builds the RFC 9457 body for a response with one or more
+// failing causes. Title summarizes the single highest-priority error (Type
+// is always "about:blank", see ProblemDetails); Errors always carries the
+// full set, even when it's only the one - it's the sole machine-readable
+// discriminator now that Type doesn't vary.
+func problemForErrors(errors []ClientError, status int) ProblemDetails {
+	return ProblemDetails{
+		Type:   problemTypeBlank,
+		Title:  selectPrimaryError(errors).problemTitle(),
+		Status: status,
+		Errors: errors,
+	}
+}
 
 func mustMarshal(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return []byte(`{"errors":[{"code":"INTERNAL"}]}`)
+		return []byte(`{"type":"about:blank","title":"Internal gateway error","status":500,"errors":["INTERNAL"]}`)
 	}
 
 	return b

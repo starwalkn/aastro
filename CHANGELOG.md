@@ -7,7 +7,68 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.9.0] — 2026-08-09
+## [0.10.0] - YYYY-MM-DD
+
+### Fixed
+
+- Retries never fired for an upstream without an explicit `method:` - `retry_on_statuses`/timeout retries were
+  silently a no-op for the common case of relying on the flow's own method. `shouldRetry` judged idempotency against
+  the raw (often empty) config value instead of the effective method used for the actual request. (The 0.9.0 entry
+  below describing this as fixed was itself wrong: the switch cases changed, but the call site never did.)
+- The `TE` response header was never stripped despite being listed in the hop-by-hop set - the map key was the literal
+  string `"TE"`, but `net/http` always stores and iterates response headers in `net/textproto` canonical form, which
+  for `TE` is `Te` (no hyphen to separate words, so only the first letter is capitalized). The lookup silently missed
+  every time, leaking the header to the client. Every other entry in that set was already canonical.
+- `policy.header_blacklist` entries were matched by exact string, not canonicalized - `header_blacklist: ["x-secret"]`
+  silently never blocked a response header that `net/http` (correctly) stores as `X-Secret`. Same root cause as the
+  `TE` fix above: HTTP header names are case-insensitive, but the code was comparing them as case-sensitive strings.
+
+### Changed
+
+- **Breaking:** flow option `passthrough` renamed to `streaming` (config field, OpenAPI `x-aastro` extension, and
+  `aastroctl openapi import --mode`). Existing configs and specs must rename `passthrough: true` to `streaming: true`
+  before upgrading.
+- **Breaking:** a flow with exactly one upstream is no longer wrapped in the JSON response envelope. Its upstream's
+  status, headers, and body are now forwarded to the client as-is - on success, and on a client error or redirect
+  (2xx/3xx/4xx), including bodies that aren't valid JSON, which previously got swallowed into an
+  `UPSTREAM_CLIENT_ERROR`/`UPSTREAM_REDIRECT` envelope. Only a genuine gateway-side failure (upstream unavailable,
+  5xx, timeout, policy violation) still returns a gateway-authored error body - see the envelope removal entry
+  below for its current shape, which by the end of this release also covers multi-upstream flows. Single-upstream
+  flows are now handled by their own dispatch path, bypassing the scatter/aggregate machinery entirely - see
+  `Router.dispatch`/`Router.buildProxyResponse`.
+- `aggregation` is no longer required for a single-upstream flow, since it's never read for one - only a flow with
+  more than one upstream must declare it (config validation enforces this in place of the old struct-tag check).
+- `aastroctl openapi import --mode envelope` renamed to `--mode proxy`, matching the response shape above; scaffolded
+  (single-upstream) flows no longer get a meaningless `aggregation: {strategy: array}` block.
+- Internal: the several independent switch statements over the upstream error classification (retry eligibility,
+  circuit breaker signal, policy applicability, client error code) were consolidated into one table
+  (`kindTable` in `upstream_error.go`), checked exhaustive at startup. Not user-facing, but worth knowing if you're
+  extending upstream error handling: add the new kind's row there rather than hunting down every switch.
+- **Breaking:** the `{"data": ..., "errors": ..., "meta": ...}` envelope is gone entirely, including for
+  multi-upstream (aggregating) flows - a client no longer unwraps a gateway-specific shape to get at the payload:
+  - A full or partial (`206`, bestEffort) success returns the aggregated data itself as the body - exactly the
+    `merge`/`array`/`namespace` result, nothing wrapping it. Which upstreams failed on a partial success moves to
+    the `X-Partial-Errors` response header (one value per failure, e.g. `UPSTREAM_UNAVAILABLE`) instead of an
+    `errors` body field.
+  - A response with no data at all - every upstream failed, or the request was rejected before reaching one
+    (rate limit, payload too large, plugin failure, single-upstream gateway failure) - is now an
+    [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details document (`application/problem+json`):
+    `{"type": "about:blank", "title", "status", "detail"?, "errors": [...]}`. `type` is always the literal
+    `"about:blank"` - RFC 9457's own placeholder for "no further-specific type" - never a real URI, deliberately:
+    a dereferencable type link is reconnaissance, since it names the gateway software fronting the request and
+    invites probing for what that implies about the backend. `errors` is the machine-readable discriminator instead
+    (always present, one entry per distinct underlying `ClientError` - more than one only for a multi-upstream
+    failure with several different causes); `title` is a human summary of the highest-priority one and may change
+    wording over time. `ClientResponse`/`ResponseMeta` are removed from the Go API; `WriteError` and the
+    OpenAPI-generated schemas both moved to `ProblemDetails`.
+  - Request correlation is unaffected by this - it was already carried solely by the `X-Request-ID` response
+    header, never duplicated into a body field.
+- **Breaking / security fix:** `builtin/middlewares/auth`'s default realm - sent in the `WWW-Authenticate` header on
+  every `401` the gateway itself returns - changed from `"aastro"` to `"restricted"`. Scope note: this is about the
+  gateway's own runtime response to a client. OpenAPI export output and anything that only affects tracing/metrics
+  (e.g. `gateway.service.name`) are a separate concern, owned by whoever runs and publishes them - not touched here.
+
+## [0.9.0] - 2026-08-09
 
 ### Added
 
@@ -52,7 +113,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `aastroctl openapi import` — generate a gateway configuration from an OpenAPI 3.x document. Documents produced by
+- `aastroctl openapi import` - generate a gateway configuration from an OpenAPI 3.x document. Documents produced by
   `openapi export --extensions` are reconstructed losslessly: flows, aggregation, upstreams, policy, and transport are
   restored, with default-valued fields elided for a minimal, human-readable result. Foreign documents are scaffolded as
   single-upstream flows, with hosts taken from `--default-host` or `servers[]`. Passthrough flows are detected from
@@ -65,7 +126,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Support for the HTTP QUERY method.
-- `aastroctl openapi export` — generate an OpenAPI 3.1 (or 3.0) document from a gateway configuration. Response statuses
+- `aastroctl openapi export` - generate an OpenAPI 3.1 (or 3.0) document from a gateway configuration. Response statuses
   are derived from the actual config: `206` only for best-effort multi-upstream flows, `409` only under
   `on_conflict: error`, `429` only when the rate limiter is enabled. Flows guarded by the builtin `auth` middleware get
   a `bearerAuth` security scheme and a `401` response. Passthrough flows are modeled as streamed `*/*` responses.
@@ -86,7 +147,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - **Hot reload of TLS certificates.** Aastro watches the directories of the configured `cert_file`,
   `key_file`, and `ca_file` paths and atomically swaps the in-memory material
   when they change. New TLS handshakes use the new certificate; in-flight
-  connections are unaffected. No configuration change is required — rotation
+  connections are unaffected. No configuration change is required - rotation
   works on the existing cert paths.
 
   Directory-level watching handles both atomic file replacement on a host
@@ -107,7 +168,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
   status ≥ 500 was coerced into an error and retried unconditionally, ignoring the
   configured status list. 5xx and non-5xx are now governed by the same rule.
 - Retries: non-retryable failures (`internal`, `body_too_large`, `policy_violation`,
-  `circuit_open`, `canceled`, `read_error`) are no longer retried — they previously
+  `circuit_open`, `canceled`, `read_error`) are no longer retried - they previously
   looped until `max_retries` was exhausted with no chance of a different outcome.
 - Upstream errors: response body and headers of 5xx responses are no longer
   discarded. They are now read and preserved on the upstream response, so error
@@ -348,7 +409,7 @@ loading will refuse to start with the old values.
 
 ---
 
-## [0.2.0] — 2026-04-26
+## [0.2.0] - 2026-04-26
 
 ### Added
 
@@ -357,7 +418,7 @@ loading will refuse to start with the old values.
   Request plugins still run; response plugins are skipped.
 - **OTLP metrics exporter** - metrics can now be pushed to any OpenTelemetry-compatible backend via `exporter: otlp`.
   Previously only Prometheus pull-mode was supported.
-- **Namespace aggregation strategy** — new `strategy: namespace` places each upstream response under its name as a key:
+- **Namespace aggregation strategy** - new `strategy: namespace` places each upstream response under its name as a key:
   `{"profile": {...}, "stats": {...}}`.
 - **Response meta envelope** - all gateway responses now include a `meta` object with `request_id` (ULID) and `partial`
   flag alongside `data` and `errors`.
@@ -382,33 +443,33 @@ loading will refuse to start with the old values.
 
 - **`dispatcher` renamed to `scatter`** - internal component renamed to better reflect the fan-out pattern. No
   user-facing configuration change.
-- **Upstream policy validation moved into upstream** — `requireBody` and `allowedStatuses` policy checks now run inside
+- **Upstream policy validation moved into upstream** - `requireBody` and `allowedStatuses` policy checks now run inside
   `upstream.call()` after the circuit breaker update, so policy violations do not affect circuit breaker state.
-- **`aggregation` is now optional for passthrough flows** — the `aggregation` block may be omitted when
+- **`aggregation` is now optional for passthrough flows** - the `aggregation` block may be omitted when
   `passthrough: true`. Configuration validation enforces this.
-- **`pprof.port` only required when pprof is enabled** — previously the validator required a port value unconditionally.
-- **`AggregationConfig` is now a pointer in `FlowConfig`** — allows the validator to correctly apply
+- **`pprof.port` only required when pprof is enabled** - previously the validator required a port value unconditionally.
+- **`AggregationConfig` is now a pointer in `FlowConfig`** - allows the validator to correctly apply
   `required_if=Passthrough false`.
-- **`Router.flows` and all internal types unexported** — `Flow`, `Upstream`, `AggregatedResponse`, `UpstreamResponse`,
+- **`Router.flows` and all internal types unexported** - `Flow`, `Upstream`, `AggregatedResponse`, `UpstreamResponse`,
   `UpstreamError`, and related types are no longer exported. Public API is limited to `Router`, `NewRouter`,
   `RoutingConfigSet`, config types, `LoadConfig`, `ClientError`, `ClientResponse`, and `WriteError`.
 
 ### Fixed
 
-- `passthrough` field not being set on compiled `flow` struct — passthrough flows were silently falling back to buffered
+- `passthrough` field not being set on compiled `flow` struct - passthrough flows were silently falling back to buffered
   mode.
-- `trackingWriter` not forwarding `Flush()` — SSE events were buffered until connection close instead of being flushed
+- `trackingWriter` not forwarding `Flush()` - SSE events were buffered until connection close instead of being flushed
   after each chunk.
-- `headersAlreadySent` always returning `true` — used `http.Flusher` type assertion which is satisfied by almost any
+- `headersAlreadySent` always returning `true` - used `http.Flusher` type assertion which is satisfied by almost any
   `ResponseWriter`, making the double-write guard ineffective.
-- `Content-Length` forwarded from upstream in passthrough mode — conflicted with chunked/streaming responses and caused
+- `Content-Length` forwarded from upstream in passthrough mode - conflicted with chunked/streaming responses and caused
   client parsing errors.
-- Circuit breaker state not updated correctly on `HalfOpen` success and `Open` failure — missing `case` branches in
+- Circuit breaker state not updated correctly on `HalfOpen` success and `Open` failure - missing `case` branches in
   switch statements.
 
 ---
 
-## [0.1.0] — initial release
+## [0.1.0] - initial release
 
 - Core routing with chi
 - Fan-out dispatch to multiple upstreams

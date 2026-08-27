@@ -121,7 +121,7 @@ func newOpenAPIImportCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&flags.input, "in", "i", "", "OpenAPI document to import (yaml or json)")
 	cmd.Flags().StringVarP(&flags.output, "out", "o", "-", "output configuration file ('-' for stdout)")
 	cmd.Flags().StringVar(&flags.defaultHost, "default-host", "", "upstream host for scaffolded flows (default: servers[0] from the document)")
-	cmd.Flags().StringVar(&flags.mode, "mode", "envelope", "flow shape for scaffolded operations: envelope or passthrough")
+	cmd.Flags().StringVar(&flags.mode, "mode", "proxy", "flow shape for scaffolded operations: proxy or streaming")
 	cmd.Flags().IntVar(&flags.serverPort, "server-port", 0, "gateway data port for the generated config (default: 7805)")
 	cmd.Flags().IntVar(&flags.adminPort, "admin-port", 0, "gateway admin port for the generated config (default: 9090)")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "overwrite the output file if it exists")

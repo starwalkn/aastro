@@ -68,7 +68,7 @@ func NewOtelOTLP(
 //   - otherwise    -> TraceIDRatioBased(ratio)
 //
 // In all three cases the decision from an incoming traceparent wins over the
-// local ratio — that is the point of ParentBased.
+// local ratio - that is the point of ParentBased.
 func SamplerFor(ratio float64) sdktrace.Sampler {
 	switch {
 	case ratio >= 1.0:

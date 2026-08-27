@@ -108,11 +108,14 @@ type RateLimiterConfig struct {
 }
 
 type FlowConfig struct {
-	Path        string `yaml:"path"   validate:"required,startswith=/"`
-	Method      string `yaml:"method" validate:"required,oneof=GET POST PUT PATCH DELETE HEAD OPTIONS QUERY"`
-	Passthrough bool   `yaml:"passthrough"`
+	Path      string `yaml:"path"   validate:"required,startswith=/"`
+	Method    string `yaml:"method" validate:"required,oneof=GET POST PUT PATCH DELETE HEAD OPTIONS QUERY"`
+	Streaming bool   `yaml:"streaming"`
 
-	Aggregation *AggregationConfig `yaml:"aggregation"  validate:"required_if=Passthrough false"`
+	// Aggregation is required only for flows with more than one upstream -
+	// a single-upstream flow is proxied directly and never aggregates
+	// (enforced in validateFlows, since that depends on len(Upstreams)).
+	Aggregation *AggregationConfig `yaml:"aggregation"`
 	Upstreams   []UpstreamConfig   `yaml:"upstreams"    validate:"required,min=1,dive,required"`
 	Plugins     []PluginConfig     `yaml:"plugins"      validate:"omitempty,dive"`
 	Middlewares []MiddlewareConfig `yaml:"middlewares"  validate:"omitempty,dive"`
@@ -177,7 +180,6 @@ type MiddlewareConfig struct {
 
 type PolicyConfig struct {
 	HeaderBlacklist     []string `yaml:"header_blacklist"`
-	AllowedStatuses     []int    `yaml:"allowed_statuses"`
 	RequireBody         bool     `yaml:"require_body"`
 	MaxResponseBodySize int64    `yaml:"max_response_body_size"`
 	FollowRedirects     bool     `yaml:"follow_redirects"`
@@ -274,8 +276,8 @@ func ValidateConfig(cfg *Config) error {
 		return errors.New("server.port and admin.port must differ")
 	}
 
-	if err := validatePathParams(*cfg); err != nil {
-		return fmt.Errorf("invalid path params configuration: %w", err)
+	if err := validateFlows(*cfg); err != nil {
+		return fmt.Errorf("invalid flow configuration: %w", err)
 	}
 
 	return nil
@@ -298,7 +300,7 @@ func newValidator() *validator.Validate {
 
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
 
-func validatePathParams(cfg Config) error {
+func validateFlows(cfg Config) error {
 	for _, f := range cfg.Gateway.Routing.Flows {
 		flowParams := extractPathParams(f.Path)
 
@@ -308,8 +310,12 @@ func validatePathParams(cfg Config) error {
 			}
 		}
 
-		if f.Passthrough && len(f.Upstreams) > 1 {
-			return errors.New("passthrough flow must have only one upstream")
+		if f.Streaming && len(f.Upstreams) > 1 {
+			return fmt.Errorf("flow %q: streaming flow must have only one upstream", f.Path)
+		}
+
+		if !f.Streaming && len(f.Upstreams) > 1 && f.Aggregation == nil {
+			return fmt.Errorf("flow %q: aggregation is required for flows with more than one upstream", f.Path)
 		}
 	}
 

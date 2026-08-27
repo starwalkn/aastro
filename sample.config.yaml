@@ -159,7 +159,6 @@ gateway:
               min_version: "1.2"
 
             policy:
-              allowed_statuses: [ 200, 204 ]
               require_body: true
               max_response_body_size: 1048576   # 1 MiB
 
@@ -186,7 +185,6 @@ gateway:
             forward_params: [ "customer_id" ]
             # No upstream tls block → public-ish HTTPS via system root CAs
             policy:
-              allowed_statuses: [ 200 ]
               retry:
                 max_retries: 2
                 retry_on_statuses: [ 503 ]
@@ -243,14 +241,14 @@ gateway:
             timeout: 5s
             forward_headers: [ "Content-Type", "Authorization" ]
 
-      # ── Example 4: passthrough (SSE / chunked / streaming) ───────────────
+      # ── Example 4: streaming (SSE / chunked) ──────────────────────────────
       # Bypasses aggregation entirely. Body streams chunk-by-chunk to the
       # client. Requires exactly one upstream. Response-phase plugins do not
       # run (body is already streaming by the time they'd execute).
 
       - path: /api/v1/events/{user_id}
         method: GET
-        passthrough: true
+        streaming: true
 
         # Request-phase plugins still run before the upstream call.
         plugins:
