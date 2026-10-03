@@ -15,6 +15,10 @@ type ReloaderConfig struct {
 	MinVersion                uint16
 	InsecureSkipVerify        bool               // client-only
 	ClientAuth                tls.ClientAuthType // server-only
+	// DisableHTTP2 advertises only http/1.1 over ALPN. The protocol list
+	// is set here rather than left to net/http because a config returned
+	// from GetConfigForClient never gets net/http's own defaults.
+	DisableHTTP2 bool
 }
 
 type Reloader struct {
@@ -70,7 +74,7 @@ func (r *Reloader) Load() error {
 func (r *Reloader) ServerConfig() *tls.Config {
 	cfg := &tls.Config{
 		MinVersion: r.cfg.MinVersion,
-		NextProtos: []string{"h2", "http/1.1"},
+		NextProtos: r.nextProtos(),
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 			return r.cert.Load(), nil
 		},
@@ -92,10 +96,18 @@ func (r *Reloader) ServerConfig() *tls.Config {
 	return cfg
 }
 
+func (r *Reloader) nextProtos() []string {
+	if r.cfg.DisableHTTP2 {
+		return []string{"http/1.1"}
+	}
+
+	return []string{"h2", "http/1.1"}
+}
+
 func (r *Reloader) ClientConfig() *tls.Config {
 	cfg := &tls.Config{
 		MinVersion: r.cfg.MinVersion,
-		NextProtos: []string{"h2", "http/1.1"},
+		NextProtos: r.nextProtos(),
 		ServerName: r.cfg.ServerName,
 	}
 

@@ -154,3 +154,41 @@ gateway:
             path: /users/{id}/events
             forward_params: [ "id" ]
             forward_queries: [ "*" ]
+
+      # One flow per upstream transport.http2 mode, all against a TLS
+      # upstream that reports the protocol it was reached over.
+      - path: /h2-upstream-auto
+        method: GET
+        upstreams:
+          - name: proto
+            hosts: {{.Proto}}
+            path: /proto
+            tls:
+              enabled: true
+              ca_file: {{.TLSDir}}/upstream-ca.crt
+            transport:
+              http2: auto
+
+      - path: /h2-upstream-on
+        method: GET
+        upstreams:
+          - name: proto
+            hosts: {{.Proto}}
+            path: /proto
+            tls:
+              enabled: true
+              ca_file: {{.TLSDir}}/upstream-ca.crt
+            transport:
+              http2: on
+
+      - path: /h2-upstream-off
+        method: GET
+        upstreams:
+          - name: proto
+            hosts: {{.Proto}}
+            path: /proto
+            tls:
+              enabled: true
+              ca_file: {{.TLSDir}}/upstream-ca.crt
+            transport:
+              http2: off

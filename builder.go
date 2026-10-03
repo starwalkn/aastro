@@ -360,7 +360,7 @@ func initUpstreams(cfgs []UpstreamConfig, trustedProxies []*net.IPNet, metrics *
 }
 
 func buildUpstream(cfg UpstreamConfig, trustedProxies []*net.IPNet, metrics *metric.Metrics, tlsRegistry *tlsutil.Registry, log *zap.Logger) (upstream, error) {
-	tlsCfg, err := buildUpstreamTLSConfig(cfg.TLS, tlsRegistry)
+	tlsCfg, err := buildUpstreamTLSConfig(cfg.TLS, cfg.Transport.HTTP2, tlsRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("build TLS config: %w", err)
 	}
@@ -483,7 +483,7 @@ func buildUpstreamTransport(cfg UpstreamConfig, tlsCfg *tls.Config) *http.Transp
 	return t
 }
 
-func buildUpstreamTLSConfig(cfg TLSConfig, reg *tlsutil.Registry) (*tls.Config, error) {
+func buildUpstreamTLSConfig(cfg TLSConfig, http2 string, reg *tlsutil.Registry) (*tls.Config, error) {
 	if !cfg.Enabled {
 		return nil, nil //nolint:nilnil // its ok here
 	}
@@ -500,6 +500,7 @@ func buildUpstreamTLSConfig(cfg TLSConfig, reg *tlsutil.Registry) (*tls.Config, 
 		ServerName:         cfg.ServerName,
 		MinVersion:         minVer,
 		InsecureSkipVerify: cfg.InsecureSkipVerify,
+		DisableHTTP2:       http2 == "off",
 	})
 	if err != nil {
 		return nil, err

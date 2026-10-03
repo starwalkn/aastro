@@ -1,5 +1,7 @@
 # Separate gateway with TLS and client_auth: require. Kept apart from
 # gateway.yaml.tmpl because mandatory mTLS would break every plain-HTTP test.
+# Started once per server-level variant (see setup in main_test.go): HTTP2
+# is auto for the main instance and off for the HTTP/1.1-only one.
 schema: v1
 debug: false
 
@@ -8,6 +10,7 @@ gateway:
     name: aastro-integration-tls
   server:
     port: {{.Port}}
+    http2: {{.HTTP2}}
     tls:
       enabled: true
       cert_file: {{.TLSDir}}/server.crt

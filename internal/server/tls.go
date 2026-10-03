@@ -8,7 +8,7 @@ import (
 	"github.com/starwalkn/aastro/internal/tlsutil"
 )
 
-func buildTLSConfig(cfg aastro.ServerTLSConfig, reg *tlsutil.Registry) (*tls.Config, error) {
+func buildTLSConfig(cfg aastro.ServerTLSConfig, http2 string, reg *tlsutil.Registry) (*tls.Config, error) {
 	if !cfg.Enabled {
 		return nil, nil //nolint:nilnil // its ok here
 	}
@@ -28,11 +28,12 @@ func buildTLSConfig(cfg aastro.ServerTLSConfig, reg *tlsutil.Registry) (*tls.Con
 	}
 
 	r, err := tlsutil.NewReloader(tlsutil.ReloaderConfig{
-		CertFile:   cfg.CertFile,
-		CAFile:     cfg.ClientCAFile,
-		KeyFile:    cfg.KeyFile,
-		MinVersion: minVer,
-		ClientAuth: clientAuth,
+		CertFile:     cfg.CertFile,
+		CAFile:       cfg.ClientCAFile,
+		KeyFile:      cfg.KeyFile,
+		MinVersion:   minVer,
+		ClientAuth:   clientAuth,
+		DisableHTTP2: http2 == "off",
 	})
 	if err != nil {
 		return nil, err

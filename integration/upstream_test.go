@@ -44,19 +44,27 @@ var (
 // upstreams are the stub backends every gateway flow in testdata/ points at.
 type upstreams struct {
 	profile, stats, prefs, stream *httptest.Server
+
+	// proto is TLS with HTTP/2 enabled, for the transport.http2 flows.
+	proto *httptest.Server
 }
 
 func startUpstreams() *upstreams {
+	proto := httptest.NewUnstartedServer(protoUpstream())
+	proto.EnableHTTP2 = true
+	proto.StartTLS()
+
 	return &upstreams{
 		profile: httptest.NewServer(jsonUpstream("profile", profiles, "")),
 		stats:   httptest.NewServer(jsonUpstream("stats", stats, `{"status": "not_found_from_stats"}`)),
 		prefs:   httptest.NewServer(jsonUpstream("prefs", prefs, "")),
 		stream:  httptest.NewServer(streamUpstream()),
+		proto:   proto,
 	}
 }
 
 func (u *upstreams) close() {
-	for _, s := range []*httptest.Server{u.profile, u.stats, u.prefs, u.stream} {
+	for _, s := range []*httptest.Server{u.profile, u.stats, u.prefs, u.stream, u.proto} {
 		s.Close()
 	}
 }
@@ -130,6 +138,18 @@ func streamUpstream() http.Handler {
 				_ = rc.Flush()
 			}
 		}
+	})
+
+	return mux
+}
+
+// protoUpstream serves GET /proto, reporting the protocol the gateway
+// reached it over.
+func protoUpstream() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /proto", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(obj{"proto": r.Proto})
 	})
 
 	return mux

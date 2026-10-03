@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -18,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"text/template"
 	"time"
@@ -46,9 +46,11 @@ type environment struct {
 
 	tlsBase     string
 	tlsPlainURL string // same port, plain http://
-	mtlsClient  *http.Client
-	noCertTLS   *http.Client
-	rogueTLS    *http.Client
+	// tlsHTTP1Base is a second instance of the same template, with http2: off.
+	tlsHTTP1Base string
+	mtlsClient   *http.Client
+	noCertTLS    *http.Client
+	rogueTLS     *http.Client
 
 	upstreams *upstreams
 	gateways  []*gateway
@@ -59,7 +61,9 @@ type environment struct {
 type gatewayParams struct {
 	Port, AdminPort               int
 	Profile, Stats, Prefs, Stream string
+	Proto                         string
 	TLSDir                        string
+	HTTP2                         string
 }
 
 func TestMain(m *testing.M) {
@@ -103,6 +107,11 @@ func setup() (*environment, error) {
 	}
 
 	certs := writeTLSFixtures(dir)
+	certgen.WriteAtomic(filepath.Join(dir, "upstream-ca.crt"), pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: e.upstreams.proto.Certificate().Raw,
+	}))
+
 	e.mtlsClient = newClient(&tls.Config{RootCAs: certs.roots, Certificates: []tls.Certificate{certs.client}})
 	e.noCertTLS = newClient(&tls.Config{RootCAs: certs.roots})
 	e.rogueTLS = newClient(&tls.Config{RootCAs: certs.roots, Certificates: []tls.Certificate{certs.rogue}})
@@ -112,14 +121,14 @@ func setup() (*environment, error) {
 		return e, err
 	}
 
-	port, err := e.start("gateway.yaml.tmpl", log)
+	port, err := e.start("gateway", "gateway.yaml.tmpl", gatewayParams{}, log)
 	if err != nil {
 		return e, err
 	}
 
 	e.base = "http://localhost:" + strconv.Itoa(port)
 
-	port, err = e.start("gateway-tls.yaml.tmpl", log)
+	port, err = e.start("gateway-tls", "gateway-tls.yaml.tmpl", gatewayParams{HTTP2: "auto"}, log)
 	if err != nil {
 		return e, err
 	}
@@ -127,12 +136,21 @@ func setup() (*environment, error) {
 	e.tlsBase = "https://localhost:" + strconv.Itoa(port)
 	e.tlsPlainURL = "http://localhost:" + strconv.Itoa(port)
 
+	port, err = e.start("gateway-tls-http1", "gateway-tls.yaml.tmpl", gatewayParams{HTTP2: "off"}, log)
+	if err != nil {
+		return e, err
+	}
+
+	e.tlsHTTP1Base = "https://localhost:" + strconv.Itoa(port)
+
 	return e, nil
 }
 
 // start renders a testdata config template with free ports and the stub
-// upstream addresses, then starts a gateway from it. Returns the data port.
-func (e *environment) start(tmplName string, log *zap.Logger) (int, error) {
+// upstream addresses, then starts a gateway named name from it. p carries
+// the template's own knobs (e.g. HTTP2), so one template can back several
+// instances. Returns the data port.
+func (e *environment) start(name, tmplName string, p gatewayParams, log *zap.Logger) (int, error) {
 	port, err := freePort()
 	if err != nil {
 		return 0, err
@@ -143,22 +161,19 @@ func (e *environment) start(tmplName string, log *zap.Logger) (int, error) {
 		return 0, err
 	}
 
-	cfgPath := filepath.Join(e.dir, strings.TrimSuffix(tmplName, ".tmpl"))
-	if err = renderConfig(tmplName, cfgPath, gatewayParams{
-		Port:      port,
-		AdminPort: adminPort,
-		Profile:   e.upstreams.profile.URL,
-		Stats:     e.upstreams.stats.URL,
-		Prefs:     e.upstreams.prefs.URL,
-		Stream:    e.upstreams.stream.URL,
-		TLSDir:    e.dir,
-	}); err != nil {
+	p.Port, p.AdminPort = port, adminPort
+	p.Profile, p.Stats, p.Prefs = e.upstreams.profile.URL, e.upstreams.stats.URL, e.upstreams.prefs.URL
+	p.Stream, p.Proto = e.upstreams.stream.URL, e.upstreams.proto.URL
+	p.TLSDir = e.dir
+
+	cfgPath := filepath.Join(e.dir, name+".yaml")
+	if err = renderConfig(tmplName, cfgPath, p); err != nil {
 		return 0, err
 	}
 
-	g, err := startGateway(cfgPath, port, adminPort, log.Named(tmplName))
+	g, err := startGateway(cfgPath, port, adminPort, log.Named(name))
 	if err != nil {
-		return 0, fmt.Errorf("%s: %w", tmplName, err)
+		return 0, fmt.Errorf("%s: %w", name, err)
 	}
 
 	e.gateways = append(e.gateways, g)
