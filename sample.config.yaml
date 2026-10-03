@@ -23,6 +23,9 @@ gateway:
     port: 7805
     timeout: 20s             # read + write timeout per request
     header_timeout: 5s       # Slowloris defence - caps header read time
+    http2: auto               # auto | on | off - auto negotiates HTTP/2 over TLS, nothing without it.
+                               # "on" requires tls.enabled (no cleartext HTTP/2 / h2c support).
+                               # "off" pins the data port to HTTP/1.1 even over TLS.
 
     # TLS / mTLS on the data port.
     # Remove the tls block entirely for plain HTTP.
@@ -147,6 +150,9 @@ gateway:
               max_idle_conns: 100
               max_idle_conns_per_host: 50
               idle_conn_timeout: 90s
+              http2: auto     # auto | on | off - same semantics as gateway.server.http2, scoped to
+                              # this upstream. "off" is the escape hatch for a backend with a flaky
+                              # HTTP/2 implementation; "on" requires this upstream's tls.enabled.
 
             # Outbound mTLS to the upstream.
             # Omit the tls block entirely for plain HTTPS - Go uses system roots.

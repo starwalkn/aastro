@@ -52,6 +52,7 @@ func New(ctx context.Context, cfg aastro.GatewayConfig, version string, log *zap
 			WriteTimeout:      cfg.Server.Timeout,
 			ReadHeaderTimeout: cfg.Server.HeaderTimeout,
 			TLSConfig:         tlsConfig,
+			Protocols:         buildProtocols(cfg.Server.HTTP2),
 			ErrorLog:          stdLog,
 		},
 		adminServer: &http.Server{
@@ -147,6 +148,24 @@ func bootstrapRouter(ctx context.Context, cfg aastro.GatewayConfig, version stri
 	}
 
 	return bundle, nil
+}
+
+func buildProtocols(http2 string) *http.Protocols {
+	switch http2 {
+	case "off":
+		p := new(http.Protocols)
+		p.SetHTTP1(true)
+
+		return p
+	case "on":
+		p := new(http.Protocols)
+		p.SetHTTP1(true)
+		p.SetHTTP2(true)
+
+		return p
+	default:
+		return nil
+	}
 }
 
 func buildHandler(bundle aastro.RouterBundle) http.Handler {

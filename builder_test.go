@@ -2,6 +2,7 @@ package aastro
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"time"
 
@@ -277,6 +278,38 @@ var _ = Describe("builder", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(u).NotTo(BeNil())
 				Expect(u.name()).To(Equal("get-test-service:7001-test-service:7002"))
+			})
+		})
+
+		Describe("buildUpstreamTransport", func() {
+			It("defaults to HTTP/1.1 only without TLS", func() {
+				t := buildUpstreamTransport(UpstreamConfig{}, nil)
+				Expect(t.Protocols).To(BeNil())
+			})
+
+			It("negotiates HTTP/2 over TLS by default (auto)", func() {
+				t := buildUpstreamTransport(UpstreamConfig{}, &tls.Config{})
+				Expect(t.Protocols).NotTo(BeNil())
+				Expect(t.Protocols.HTTP1()).To(BeTrue())
+				Expect(t.Protocols.HTTP2()).To(BeTrue())
+			})
+
+			It("negotiates HTTP/2 over TLS when explicitly on", func() {
+				cfg := UpstreamConfig{Transport: TransportConfig{HTTP2: "on"}}
+
+				t := buildUpstreamTransport(cfg, &tls.Config{})
+				Expect(t.Protocols).NotTo(BeNil())
+				Expect(t.Protocols.HTTP1()).To(BeTrue())
+				Expect(t.Protocols.HTTP2()).To(BeTrue())
+			})
+
+			It("pins the transport to HTTP/1.1 when off, even over TLS", func() {
+				cfg := UpstreamConfig{Transport: TransportConfig{HTTP2: "off"}}
+
+				t := buildUpstreamTransport(cfg, &tls.Config{})
+				Expect(t.Protocols).NotTo(BeNil())
+				Expect(t.Protocols.HTTP1()).To(BeTrue())
+				Expect(t.Protocols.HTTP2()).To(BeFalse())
 			})
 		})
 	})

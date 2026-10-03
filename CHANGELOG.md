@@ -7,6 +7,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- `http2: auto | on | off` on `gateway.server` and per-upstream `transport`. `auto` (the default)
+  is exactly today's behavior: HTTP/2 negotiated over TLS, HTTP/1.1 otherwise - existing configs
+  are unaffected. `off` pins either side to HTTP/1.1 even when TLS is on - the escape hatch for a
+  backend with a flaky HTTP/2 stack, or a quick killswitch on the data port (e.g. for HTTP/2 Rapid
+  Reset-style concerns) without touching TLS config. `on` requires `tls.enabled` at the same scope
+  - the gateway has no cleartext HTTP/2 (h2c) support - and is rejected by config validation
+  otherwise.
+
+### Changed
+
+- Internal: upstream transports now set HTTP/2 via `http.Transport.Protocols` instead of the
+  deprecated `golang.org/x/net/http2.ConfigureTransport`, dropping the direct dependency on
+  `golang.org/x/net` (now indirect-only, pulled in transitively). Not user-facing by itself -
+  `http2: auto` behaves exactly as before - but it's what made the explicit on/off knob above
+  straightforward to add on the client side; the data port gets the equivalent treatment via the
+  same `http.Server.Protocols` field.
+
 ## [0.10.0] - 2026-08-28
 
 ### Fixed

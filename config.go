@@ -52,6 +52,7 @@ type ServerConfig struct {
 	Port          int             `yaml:"port"    validate:"required,min=1,max=65535"`
 	Timeout       time.Duration   `yaml:"timeout" default:"5s"`
 	HeaderTimeout time.Duration   `yaml:"header_timeout" default:"5s"`
+	HTTP2         string          `yaml:"http2" default:"auto" validate:"omitempty,oneof=auto on off"`
 	TLS           ServerTLSConfig `yaml:"tls"`
 }
 
@@ -162,6 +163,7 @@ type TransportConfig struct {
 	MaxIdleConns        int           `yaml:"max_idle_conns"         default:"100"`
 	MaxIdleConnsPerHost int           `yaml:"max_idle_conns_per_host" default:"50"`
 	IdleConnTimeout     time.Duration `yaml:"idle_conn_timeout"      default:"90s"`
+	HTTP2               string        `yaml:"http2" default:"auto" validate:"omitempty,oneof=auto on off"`
 }
 
 type PluginConfig struct {
@@ -280,6 +282,10 @@ func ValidateConfig(cfg *Config) error {
 		return fmt.Errorf("invalid flow configuration: %w", err)
 	}
 
+	if err := validateHTTP2(*cfg); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -316,6 +322,22 @@ func validateFlows(cfg Config) error {
 
 		if !f.Streaming && len(f.Upstreams) > 1 && f.Aggregation == nil {
 			return fmt.Errorf("flow %q: aggregation is required for flows with more than one upstream", f.Path)
+		}
+	}
+
+	return nil
+}
+
+func validateHTTP2(cfg Config) error {
+	if cfg.Gateway.Server.HTTP2 == "on" && !cfg.Gateway.Server.TLS.Enabled {
+		return errors.New("gateway.server.http2: cannot be 'on' without gateway.server.tls.enabled")
+	}
+
+	for _, f := range cfg.Gateway.Routing.Flows {
+		for _, u := range f.Upstreams {
+			if u.Transport.HTTP2 == "on" && !u.TLS.Enabled {
+				return fmt.Errorf("upstream %q: transport.http2 cannot be 'on' without tls.enabled", u.Name)
+			}
 		}
 	}
 

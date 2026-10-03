@@ -15,7 +15,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.uber.org/zap"
-	"golang.org/x/net/http2"
 
 	"github.com/starwalkn/aastro/internal/circuitbreaker"
 	"github.com/starwalkn/aastro/internal/metric"
@@ -366,10 +365,7 @@ func buildUpstream(cfg UpstreamConfig, trustedProxies []*net.IPNet, metrics *met
 		return nil, fmt.Errorf("build TLS config: %w", err)
 	}
 
-	transport, err := buildUpstreamTransport(cfg, tlsCfg)
-	if err != nil {
-		return nil, fmt.Errorf("build upstream transport: %w", err)
-	}
+	transport := buildUpstreamTransport(cfg, tlsCfg)
 
 	if cfg.TLS.InsecureSkipVerify {
 		log.Warn("TLS verification disabled for upstream",
@@ -459,22 +455,32 @@ func buildCircuitBreaker(cfg CircuitBreakerConfig) *circuitbreaker.CircuitBreake
 	return circuitbreaker.New(cfg.MaxFailures, cfg.ResetTimeout)
 }
 
-func buildUpstreamTransport(cfg UpstreamConfig, tlsCfg *tls.Config) (*http.Transport, error) {
+func buildUpstreamTransport(cfg UpstreamConfig, tlsCfg *tls.Config) *http.Transport {
 	t := &http.Transport{
 		MaxIdleConns:        cfg.Transport.MaxIdleConns,
 		MaxIdleConnsPerHost: cfg.Transport.MaxIdleConnsPerHost,
 		IdleConnTimeout:     cfg.Transport.IdleConnTimeout,
-		ForceAttemptHTTP2:   true,
 		TLSClientConfig:     tlsCfg,
 	}
 
-	if tlsCfg != nil {
-		if err := http2.ConfigureTransport(t); err != nil {
-			return nil, fmt.Errorf("configure HTTP/2: %w", err)
-		}
+	if cfg.Transport.HTTP2 == "off" {
+		protocols := new(http.Protocols)
+		protocols.SetHTTP1(true)
+		t.Protocols = protocols
+
+		return t
 	}
 
-	return t, nil
+	t.ForceAttemptHTTP2 = true
+
+	if tlsCfg != nil {
+		protocols := new(http.Protocols)
+		protocols.SetHTTP1(true)
+		protocols.SetHTTP2(true)
+		t.Protocols = protocols
+	}
+
+	return t
 }
 
 func buildUpstreamTLSConfig(cfg TLSConfig, reg *tlsutil.Registry) (*tls.Config, error) {

@@ -160,6 +160,8 @@ aastro -T -c aastro.yaml    # same, plus dump the effective config (defaults app
 
 **Security**
 - TLS and mutual TLS on the inbound data port and per upstream
+- `http2: auto | on | off` on the data port and per upstream - force HTTP/1.1 for a flaky
+  backend or as a quick killswitch, independently of each other
 - Zero-downtime certificate hot-reload - cert-manager, Vault Agent, and SPIFFE/SPIRE ready
 - Builtin JWT `auth` middleware
 - Admin port bound to localhost by default and never TLS-terminated
