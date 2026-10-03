@@ -1,0 +1,156 @@
+# Plain-HTTP gateway for the integration tests. Hosts and ports are filled in
+# by TestMain (see harness_test.go): upstreams are httptest servers on random
+# ports, the gateway itself gets a free port.
+#
+# Every upstream forwards all query params ("*"), so the stubs' inject()
+# overrides (status, body, delay, drop, redirect, ...) are reachable from the
+# test URL without touching this file.
+#
+# Policies live on dedicated flows, one concern each, so that e.g. tripping
+# the circuit breaker can't fail an unrelated status-code test that happens
+# to hit the same upstream.
+schema: v1
+debug: false
+
+gateway:
+  service:
+    name: aastro-integration
+  server:
+    port: {{.Port}}
+  admin:
+    port: {{.AdminPort}}
+    bind_addr: 127.0.0.1
+  routing:
+    flows:
+      # Single upstream, no policy: proxied directly, no envelope.
+      - path: /single/{id}
+        method: GET
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+
+      # Retry only, no circuit breaker.
+      - path: /single-retry/{id}
+        method: GET
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+            policy:
+              retry:
+                max_retries: 2
+                retry_on_statuses: [ 429 ]
+                backoff_delay: 50ms
+
+      # Circuit breaker only, tripped by a single 5xx.
+      - path: /single-breaker/{id}
+        method: GET
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+            policy:
+              circuit_breaker:
+                enabled: true
+                max_failures: 1
+                reset_timeout: 2s
+
+      # Short timeout, no retries: pair with ?delay=1s for a fast genuine timeout.
+      - path: /single-fast-timeout/{id}
+        method: GET
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+            timeout: 300ms
+
+      # follow_redirects: true, the counterpart of /single/{id}.
+      - path: /single-follow/{id}
+        method: GET
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+            policy:
+              follow_redirects: true
+
+      # forward_headers (request -> upstream allowlist) and header_blacklist
+      # (upstream response -> client), opposite directions.
+      - path: /single-headers/{id}
+        method: GET
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+            forward_headers: [ "X-Allowed", "X-Prefix-*" ]
+            policy:
+              # "x-lower-secret" is deliberately not canonical, to cover
+              # case-insensitive matching against response headers.
+              header_blacklist: [ "X-Secret", "x-lower-secret" ]
+
+      # Multi-upstream, merge, best_effort: one failing upstream -> 206.
+      - path: /merge/{id}
+        method: GET
+        aggregation:
+          strategy: merge
+          best_effort: true
+          on_conflict:
+            policy: first
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+          - name: stats
+            hosts: {{.Stats}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+          - name: prefs
+            hosts: {{.Prefs}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+
+      # Multi-upstream, array, strict: shared status propagation, otherwise 502.
+      - path: /array/{id}
+        method: GET
+        aggregation:
+          strategy: array
+          best_effort: false
+        upstreams:
+          - name: profile
+            hosts: {{.Profile}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+          - name: stats
+            hosts: {{.Stats}}
+            path: /users/{id}
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]
+
+      # Unbuffered SSE passthrough.
+      - path: /users/{id}/events
+        method: GET
+        streaming: true
+        upstreams:
+          - name: stream
+            hosts: {{.Stream}}
+            path: /users/{id}/events
+            forward_params: [ "id" ]
+            forward_queries: [ "*" ]

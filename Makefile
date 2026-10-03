@@ -12,7 +12,7 @@ BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)
 
-.PHONY: all build aastro aastroctl plugins clean lint test
+.PHONY: all build aastro aastroctl plugins clean lint test test-integration
 
 all: clean build plugins
 
@@ -48,5 +48,10 @@ clean:
 lint:
 	golangci-lint run
 
+# Runs the gateway unit tests.
 test:
 	go test ./...
+
+# Runs the gateway in-process against stub upstreams, see integration/.
+test-integration:
+	go test -tags integration -race -count=1 ./integration/...
