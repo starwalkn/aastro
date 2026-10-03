@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/starwalkn/aastro"
+	"github.com/voidrunner3074/aastro"
 )
 
 const (

@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/circuitbreaker"
+	"github.com/voidrunner3074/aastro/internal/circuitbreaker"
 )
 
 func TestHTTPUpstream_ResolveHeaders(t *testing.T) {

@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/tracing"
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/internal/tracing"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 const streamBuffer = 16 * 1024

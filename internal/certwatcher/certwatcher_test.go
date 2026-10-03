@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/certwatcher"
-	"github.com/starwalkn/aastro/internal/testutil/certgen"
-	"github.com/starwalkn/aastro/internal/tlsutil"
+	"github.com/voidrunner3074/aastro/internal/certwatcher"
+	"github.com/voidrunner3074/aastro/internal/testutil/certgen"
+	"github.com/voidrunner3074/aastro/internal/tlsutil"
 )
 
 type countingRegistry struct {

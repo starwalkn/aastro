@@ -12,8 +12,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/metric"
-	"github.com/starwalkn/aastro/internal/tracing"
+	"github.com/voidrunner3074/aastro/internal/metric"
+	"github.com/voidrunner3074/aastro/internal/tracing"
 )
 
 const maxBodySize = 5 << 20 // 5 MB

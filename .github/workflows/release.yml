@@ -23,7 +23,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: starwalkn/aastro
+          images: voidrunner3074/aastro
           tags: type=semver,pattern={{version}}
 
       - name: Login to Docker Hub

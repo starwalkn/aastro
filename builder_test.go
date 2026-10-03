@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/tlsutil"
+	"github.com/voidrunner3074/aastro/internal/tlsutil"
 )
 
 func TestBuilder_NewRouter(t *testing.T) {

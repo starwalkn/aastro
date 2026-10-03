@@ -24,10 +24,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/metric"
-	"github.com/starwalkn/aastro/internal/ratelimit"
-	"github.com/starwalkn/aastro/internal/tracing"
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/internal/metric"
+	"github.com/voidrunner3074/aastro/internal/ratelimit"
+	"github.com/voidrunner3074/aastro/internal/tracing"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 // Keys must be net/textproto's canonical form (net/http always stores and

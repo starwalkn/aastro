@@ -6,7 +6,7 @@ response aggregation, and dynamically loaded `.so` plugins that can modify the i
 
 All kinds of contributions are welcome: bug fixes, performance work, documentation, tests,
 example plugins, and features. If you are unsure whether something fits, open a
-[discussion](https://github.com/starwalkn/aastro/discussions) before writing code.
+[discussion](https://github.com/voidrunner3074/aastro/discussions) before writing code.
 
 ---
 
@@ -28,7 +28,7 @@ example plugins, and features. If you are unsure whether something fits, open a
 ## Local development
 
 ```bash
-git clone https://github.com/starwalkn/aastro.git
+git clone https://github.com/voidrunner3074/aastro.git
 cd aastro
 
 # Builds .bin/aastro, .bin/aastroctl, and every builtin plugin/middleware
@@ -187,7 +187,7 @@ changelog. Small PRs get reviewed faster than large ones.
 
 ## Reporting bugs
 
-Open an [issue](https://github.com/starwalkn/aastro/issues/new/choose) and include:
+Open an [issue](https://github.com/voidrunner3074/aastro/issues/new/choose) and include:
 
 - Aastro version (`aastro -V`), Go version, and OS
 - how you run it: Docker image, or a local build

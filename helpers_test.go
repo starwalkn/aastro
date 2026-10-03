@@ -21,9 +21,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/circuitbreaker"
-	"github.com/starwalkn/aastro/internal/metric"
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/internal/circuitbreaker"
+	"github.com/voidrunner3074/aastro/internal/metric"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 var testMetrics *metric.Metrics

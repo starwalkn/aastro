@@ -9,7 +9,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 type Plugin struct{}
@@ -23,7 +23,7 @@ func (p *Plugin) Info() sdk.PluginInfo {
 		Name:        "snakeify",
 		Description: "The plugin can be used to transform JSON field names in the response into the snake_case style.",
 		Version:     "v1",
-		Author:      "starwalkn",
+		Author:      "voidrunner3074",
 	}
 }
 

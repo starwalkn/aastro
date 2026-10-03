@@ -3,16 +3,16 @@
 A lightweight, modular, high-performance **API Gateway** for modern microservices -
 parallel fan-out, declarative response aggregation, and `.so` plugins, configured in YAML.
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/starwalkn/aastro)](https://golang.org)
-[![License](https://img.shields.io/github/license/starwalkn/aastro)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/starwalkn/aastro)](https://github.com/starwalkn/aastro/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/starwalkn/aastro)](https://hub.docker.com/r/starwalkn/aastro)
-[![Coverage Status](https://coveralls.io/repos/github/starwalkn/aastro/badge.svg)](https://coveralls.io/github/starwalkn/aastro)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/voidrunner3074/aastro)](https://golang.org)
+[![License](https://img.shields.io/github/license/voidrunner3074/aastro)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/voidrunner3074/aastro)](https://github.com/voidrunner3074/aastro/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/voidrunner3074/aastro)](https://hub.docker.com/r/voidrunner3074/aastro)
+[![Coverage Status](https://coveralls.io/repos/github/voidrunner3074/aastro/badge.svg)](https://coveralls.io/github/voidrunner3074/aastro)
 
-**[Documentation](https://starwalkn.github.io/aastro-docs/)** ·
+**[Documentation](https://voidrunner3074.github.io/aastro-docs/)** ·
 [Configuration reference](sample.config.yaml) ·
 [Changelog](CHANGELOG.md) ·
-[Discussions](https://github.com/starwalkn/aastro/discussions)
+[Discussions](https://github.com/voidrunner3074/aastro/discussions)
 
 > **Status: 0.x.** The gateway is used in real deployments and every release is documented,
 > but the configuration schema is still allowed to change in minor versions. Breaking changes
@@ -113,7 +113,7 @@ Every configuration option, with comments, lives in [`sample.config.yaml`](sampl
 docker run \
   -p 7805:7805 \
   -v "$(pwd)/aastro.yaml:/etc/aastro/config.yaml:ro" \
-  starwalkn/aastro:latest
+  voidrunner3074/aastro:latest
 ```
 
 `/etc/aastro/config.yaml` is the default config path. To mount it elsewhere, point
@@ -125,7 +125,7 @@ Building the gateway requires `CGO_ENABLED=1` and a C toolchain, because plugins
 objects (`-buildmode=plugin`).
 
 ```bash
-git clone https://github.com/starwalkn/aastro.git
+git clone https://github.com/voidrunner3074/aastro.git
 cd aastro
 
 make all GOOS=<YOUR_OS> GOARCH=<YOUR_ARCH>   # builds .bin/aastro, .bin/aastroctl and the builtin .so files
@@ -267,7 +267,7 @@ plugins:
 
 Plugins must be compiled with the exact Go version and dependency set used for the gateway
 binary - Go's plugin ABI is unforgiving. See the
-[plugin guide](https://starwalkn.github.io/aastro-docs/) and
+[plugin guide](https://voidrunner3074.github.io/aastro-docs/) and
 [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 ---
@@ -275,7 +275,7 @@ binary - Go's plugin ABI is unforgiving. See the
 ## Roadmap
 
 Development is driven by demonstrated demand rather than a fixed feature list. Open a
-[discussion](https://github.com/starwalkn/aastro/discussions) or upvote an existing issue -
+[discussion](https://github.com/voidrunner3074/aastro/discussions) or upvote an existing issue -
 that is genuinely how the next milestone gets picked.
 
 ---

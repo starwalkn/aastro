@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/starwalkn/aastro"
+	"github.com/voidrunner3074/aastro"
 )
 
 func newTestLogger(buf *bytes.Buffer) *zap.Logger {

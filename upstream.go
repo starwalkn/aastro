@@ -24,8 +24,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/circuitbreaker"
-	"github.com/starwalkn/aastro/internal/metric"
+	"github.com/voidrunner3074/aastro/internal/circuitbreaker"
+	"github.com/voidrunner3074/aastro/internal/metric"
 )
 
 const methodQuery = "QUERY"

@@ -226,7 +226,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 
 - New command-line interface and ctl for stub plugins initialization.
-  For more information about the CLI, see the [documentation](https://starwalkn.github.io/aastrodocs).
+  For more information about the CLI, see the [documentation](https://voidrunner3074.github.io/aastrodocs).
 
 ### Changed
 

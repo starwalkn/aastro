@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 func TestStreaming_SSEResponse(t *testing.T) {

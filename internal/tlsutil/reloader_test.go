@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/starwalkn/aastro/internal/testutil/certgen"
+	"github.com/voidrunner3074/aastro/internal/testutil/certgen"
 )
 
 func served(t *testing.T, r *Reloader) int64 {

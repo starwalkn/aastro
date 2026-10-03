@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 func TestRouter_ServeHTTP_SuccessfulFlow(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"crypto/tls"
 	"errors"
 
-	"github.com/starwalkn/aastro"
-	"github.com/starwalkn/aastro/internal/tlsutil"
+	"github.com/voidrunner3074/aastro"
+	"github.com/voidrunner3074/aastro/internal/tlsutil"
 )
 
 func buildTLSConfig(cfg aastro.ServerTLSConfig, http2 string, reg *tlsutil.Registry) (*tls.Config, error) {

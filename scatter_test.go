@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/starwalkn/aastro/internal/circuitbreaker"
+	"github.com/voidrunner3074/aastro/internal/circuitbreaker"
 )
 
 func TestScatter_DispatchingToMultipleUpstreams(t *testing.T) {

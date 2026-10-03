@@ -19,7 +19,7 @@ RUN make build plugins \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} VERSION=${VERSION} COMMIT=${COMMIT} BUILD_DATE=${BUILD_DATE}
 
 # Stage 2: Final minimal image
-FROM chainguard/wolfi-base@sha256:bfcffaf1336b26a3fd33c8cb31a86a09324d2048420d7f49b983f323b0d33e8d AS runtime
+FROM chainguard/wolfi-base@sha256:a68cc72c5bb76e13b162fc0c70da5aca179167d948d4f49a0dbdf2b74009665d AS runtime
 
 ARG VERSION
 ARG COMMIT
@@ -28,7 +28,7 @@ LABEL org.opencontainers.image.title="aastro" \
       org.opencontainers.image.description="Aastro API Gateway" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT}" \
-      org.opencontainers.image.source="https://github.com/starwalkn/aastro" \
+      org.opencontainers.image.source="https://github.com/voidrunner3074/aastro" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --from=builder /app/.bin/aastro /usr/local/bin/aastro

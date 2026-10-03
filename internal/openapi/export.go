@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/starwalkn/aastro"
+	"github.com/voidrunner3074/aastro"
 )
 
 // Options controls document generation.

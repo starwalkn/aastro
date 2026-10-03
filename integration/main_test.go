@@ -25,9 +25,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro"
-	"github.com/starwalkn/aastro/internal/server"
-	"github.com/starwalkn/aastro/internal/testutil/certgen"
+	"github.com/voidrunner3074/aastro"
+	"github.com/voidrunner3074/aastro/internal/server"
+	"github.com/voidrunner3074/aastro/internal/testutil/certgen"
 )
 
 const (

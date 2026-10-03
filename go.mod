@@ -1,4 +1,4 @@
-module github.com/starwalkn/aastro
+module github.com/voidrunner3074/aastro
 
 go 1.26.7
 

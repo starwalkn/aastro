@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/starwalkn/aastro"
+	"github.com/voidrunner3074/aastro"
 )
 
 func minimalUpstream(name string) aastro.UpstreamConfig {

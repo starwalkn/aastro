@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/starwalkn/aastro"
+	"github.com/voidrunner3074/aastro"
 )
 
 func runTest(cfgPath string, dump, quiet bool) int {

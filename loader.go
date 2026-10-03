@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 const (

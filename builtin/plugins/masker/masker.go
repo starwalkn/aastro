@@ -8,7 +8,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 const maskValue = "***"
@@ -26,7 +26,7 @@ func (p *Plugin) Info() sdk.PluginInfo {
 		Name:        "masker",
 		Description: "Masks sensitive fields in JSON response body.",
 		Version:     "v1",
-		Author:      "starwalkn",
+		Author:      "voidrunner3074",
 	}
 }
 

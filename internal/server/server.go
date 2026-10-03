@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/starwalkn/aastro"
-	"github.com/starwalkn/aastro/internal/otelcommon"
+	"github.com/voidrunner3074/aastro"
+	"github.com/voidrunner3074/aastro/internal/otelcommon"
 )
 
 type Server struct {

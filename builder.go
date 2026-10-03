@@ -16,12 +16,12 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro/internal/circuitbreaker"
-	"github.com/starwalkn/aastro/internal/metric"
-	"github.com/starwalkn/aastro/internal/otelcommon"
-	"github.com/starwalkn/aastro/internal/ratelimit"
-	"github.com/starwalkn/aastro/internal/tlsutil"
-	"github.com/starwalkn/aastro/internal/tracing"
+	"github.com/voidrunner3074/aastro/internal/circuitbreaker"
+	"github.com/voidrunner3074/aastro/internal/metric"
+	"github.com/voidrunner3074/aastro/internal/otelcommon"
+	"github.com/voidrunner3074/aastro/internal/ratelimit"
+	"github.com/voidrunner3074/aastro/internal/tlsutil"
+	"github.com/voidrunner3074/aastro/internal/tracing"
 )
 
 type RoutingConfigSet struct {

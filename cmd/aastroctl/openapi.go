@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/starwalkn/aastro"
-	"github.com/starwalkn/aastro/internal/openapi"
+	"github.com/voidrunner3074/aastro"
+	"github.com/voidrunner3074/aastro/internal/openapi"
 )
 
 const indent = 2

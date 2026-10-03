@@ -15,9 +15,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
-	"github.com/starwalkn/aastro"
-	"github.com/starwalkn/aastro/internal/logger"
-	"github.com/starwalkn/aastro/sdk"
+	"github.com/voidrunner3074/aastro"
+	"github.com/voidrunner3074/aastro/internal/logger"
+	"github.com/voidrunner3074/aastro/sdk"
 )
 
 type ctxKeyClaims struct{}
