@@ -17,8 +17,6 @@ example plugins, and features. If you are unsure whether something fits, open a
 - **A C toolchain** (`gcc`/`clang` + `make`) - the gateway and all plugins are built with
   `CGO_ENABLED=1` and `-buildmode=plugin`.
 - **Docker** - optional, but the fastest way to reproduce the release build.
-- **Ginkgo CLI** for running the suites locally:
-  `go install github.com/onsi/ginkgo/v2/ginkgo@latest`
 - **golangci-lint** matching the version pinned in
   [`.github/workflows/checks.yml`](workflows/checks.yml).
 
@@ -89,12 +87,13 @@ want to reach `/metrics` or `/__health` from outside the container.
 ## Testing
 
 ```bash
-make test          # ginkgo -r -p
-ginkgo -r -race    # run this before pushing anything touching concurrency
+make test               # go test ./...
+go test -race ./...     # run this before pushing anything touching concurrency
 ```
 
-Tests use [Ginkgo](https://github.com/onsi/ginkgo) and Gomega, with `DescribeTable` for
-table-driven cases. Match the surrounding style of the package you are changing.
+Tests use the standard library `testing` package and [testify](https://github.com/stretchr/testify)
+(`assert`/`require`), with a slice of cases plus `t.Run` for table-driven scenarios. Match the
+surrounding style of the package you are changing.
 
 Please add or extend tests when your change touches:
 

@@ -1,26 +1,37 @@
 package openapi
 
 import (
+	"slices"
+	"strings"
+	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/starwalkn/aastro"
 )
 
-func importDoc(doc *Document, opts ImportOptions) (aastro.Config, []Warning) {
-	GinkgoHelper()
+func importDoc(t *testing.T, doc *Document, opts ImportOptions) (aastro.Config, []Warning) {
+	t.Helper()
 
 	cfg, warnings, err := ToConfig(doc, opts)
-	Expect(err).NotTo(HaveOccurred())
+	require.NoError(t, err)
 
 	return cfg, warnings
 }
 
-var _ = Describe("ToConfig", func() {
-	Describe("round-trip with x-aastro extensions", func() {
-		It("satisfies export ∘ import ∘ export fixpoint for middleware-free configs", func() {
+// assertWarningMatches fails with the full warning list if none of them
+// satisfy match - more useful on failure than a bare assert.True would be.
+func assertWarningMatches(t *testing.T, warnings []Warning, match func(Warning) bool) {
+	t.Helper()
+
+	assert.True(t, slices.ContainsFunc(warnings, match), "no warning matched, got: %+v", warnings)
+}
+
+func TestToConfig(t *testing.T) {
+	t.Run("round-trip with x-aastro extensions", func(t *testing.T) {
+		t.Run("satisfies export compose import compose export fixpoint for middleware-free configs", func(t *testing.T) {
 			original := configWith(true,
 				mergeFlow("/api/v1/user/{id}", true, "prefer", func() aastro.UpstreamConfig {
 					u := minimalUpstream("billing")
@@ -38,91 +49,92 @@ var _ = Describe("ToConfig", func() {
 			queryFlow.Method = "QUERY"
 			original.Gateway.Routing.Flows = append(original.Gateway.Routing.Flows, queryFlow)
 
-			firstDoc, _ := generate(original, Options{Extensions: true})
+			firstDoc, _ := generate(t, original, Options{Extensions: true})
 
-			imported, warnings := importDoc(firstDoc, ImportOptions{})
-			Expect(warnings).To(HaveLen(1))
-			Expect(warnings[0].Message).To(ContainSubstring("rate limiter enabled"))
+			imported, warnings := importDoc(t, firstDoc, ImportOptions{})
+			require.Len(t, warnings, 1)
+			assert.Contains(t, warnings[0].Message, "rate limiter enabled")
 
-			secondDoc, _ := generate(imported, Options{Extensions: true})
+			secondDoc, _ := generate(t, imported, Options{Extensions: true})
 
-			Expect(secondDoc).To(Equal(firstDoc))
+			assert.Equal(t, firstDoc, secondDoc)
 		})
 
-		It("reconstructs aggregation, upstreams, and timeouts losslessly", func() {
+		t.Run("reconstructs aggregation, upstreams, and timeouts losslessly", func(t *testing.T) {
 			u := minimalUpstream("billing")
 			u.Timeout = 7 * time.Second
 
 			original := configWith(false, mergeFlow("/a/{id}", true, "prefer", u, minimalUpstream("profile")))
 			original.Gateway.Routing.Flows[0].Aggregation.OnConflict.Upstream = "billing"
 
-			doc, _ := generate(original, Options{Extensions: true})
-			cfg, _ := importDoc(doc, ImportOptions{})
+			doc, _ := generate(t, original, Options{Extensions: true})
+			cfg, _ := importDoc(t, doc, ImportOptions{})
 
-			Expect(cfg.Gateway.Routing.Flows).To(HaveLen(1))
-
-			flow := cfg.Gateway.Routing.Flows[0]
-			Expect(flow.Path).To(Equal("/a/{id}"))
-			Expect(flow.Aggregation.Strategy).To(Equal("merge"))
-			Expect(flow.Aggregation.BestEffort).To(BeTrue())
-			Expect(flow.Aggregation.OnConflict.Policy).To(Equal("prefer"))
-			Expect(flow.Aggregation.OnConflict.Upstream).To(Equal("billing"))
-			Expect(flow.Upstreams[0].Timeout).To(Equal(7 * time.Second))
-			Expect(flow.Upstreams[1].Timeout).To(Equal(3 * time.Second))
-		})
-
-		It("restores streaming flows without aggregation", func() {
-			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{Extensions: true})
-			cfg, _ := importDoc(doc, ImportOptions{})
+			require.Len(t, cfg.Gateway.Routing.Flows, 1)
 
 			flow := cfg.Gateway.Routing.Flows[0]
-			Expect(flow.Streaming).To(BeTrue())
-			Expect(flow.Aggregation).To(BeNil())
+			assert.Equal(t, "/a/{id}", flow.Path)
+			assert.Equal(t, "merge", flow.Aggregation.Strategy)
+			assert.True(t, flow.Aggregation.BestEffort)
+			assert.Equal(t, "prefer", flow.Aggregation.OnConflict.Policy)
+			assert.Equal(t, "billing", flow.Aggregation.OnConflict.Upstream)
+			assert.Equal(t, 7*time.Second, flow.Upstreams[0].Timeout)
+			assert.Equal(t, 3*time.Second, flow.Upstreams[1].Timeout)
 		})
 
-		It("restores QUERY flows from x-aastro-query", func() {
+		t.Run("restores streaming flows without aggregation", func(t *testing.T) {
+			doc, _ := generate(t, configWith(false, streamingFlow("/s")), Options{Extensions: true})
+			cfg, _ := importDoc(t, doc, ImportOptions{})
+
+			flow := cfg.Gateway.Routing.Flows[0]
+			assert.True(t, flow.Streaming)
+			assert.Nil(t, flow.Aggregation)
+		})
+
+		t.Run("restores QUERY flows from x-aastro-query", func(t *testing.T) {
 			f := mergeFlow("/search", false, "", minimalUpstream("q"))
 			f.Method = "QUERY"
 
-			doc, _ := generate(configWith(false, f), Options{Extensions: true})
-			cfg, _ := importDoc(doc, ImportOptions{})
+			doc, _ := generate(t, configWith(false, f), Options{Extensions: true})
+			cfg, _ := importDoc(t, doc, ImportOptions{})
 
-			Expect(cfg.Gateway.Routing.Flows[0].Method).To(Equal("QUERY"))
+			assert.Equal(t, "QUERY", cfg.Gateway.Routing.Flows[0].Method)
 		})
 
-		It("drops middlewares with a warning instead of emitting broken configs", func() {
+		t.Run("drops middlewares with a warning instead of emitting broken configs", func(t *testing.T) {
 			f := mergeFlow("/secured", false, "", minimalUpstream("u"))
 			f.Middlewares = []aastro.MiddlewareConfig{
 				{Name: "recoverer", Source: "builtin"},
 				authMiddlewareConfig(map[string]interface{}{"issuer": "https://idp"}),
 			}
 
-			doc, _ := generate(configWith(false, f), Options{Extensions: true})
-			cfg, warnings := importDoc(doc, ImportOptions{})
+			doc, _ := generate(t, configWith(false, f), Options{Extensions: true})
+			cfg, warnings := importDoc(t, doc, ImportOptions{})
 
-			Expect(cfg.Gateway.Routing.Flows[0].Middlewares).To(BeEmpty())
-			Expect(warnings).To(ContainElement(SatisfyAll(
-				HaveField("Flow", "GET /secured"),
-				HaveField("Message", ContainSubstring("recoverer, auth")),
-			)))
+			assert.Empty(t, cfg.Gateway.Routing.Flows[0].Middlewares)
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return w.Flow == "GET /secured" && strings.Contains(w.Message, "recoverer, auth")
+			})
 		})
 
-		It("infers the rate limiter from 429 responses", func() {
-			doc, _ := generate(configWith(true, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{Extensions: true})
-			cfg, warnings := importDoc(doc, ImportOptions{})
+		t.Run("infers the rate limiter from 429 responses", func(t *testing.T) {
+			doc, _ := generate(t, configWith(true, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{Extensions: true})
+			cfg, warnings := importDoc(t, doc, ImportOptions{})
 
-			Expect(cfg.Gateway.Routing.RateLimiter.Enabled).To(BeTrue())
-			Expect(cfg.Gateway.Routing.RateLimiter.Config).To(HaveKey("limit"))
-			Expect(warnings).To(ContainElement(HaveField("Message", ContainSubstring("rate limiter enabled"))))
+			assert.True(t, cfg.Gateway.Routing.RateLimiter.Enabled)
+			assert.Contains(t, cfg.Gateway.Routing.RateLimiter.Config, "limit")
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return strings.Contains(w.Message, "rate limiter enabled")
+			})
 
-			unlimitedDoc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{Extensions: true})
-			unlimitedCfg, _ := importDoc(unlimitedDoc, ImportOptions{})
+			unlimitedDoc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{Extensions: true})
+			unlimitedCfg, _ := importDoc(t, unlimitedDoc, ImportOptions{})
 
-			Expect(unlimitedCfg.Gateway.Routing.RateLimiter.Enabled).To(BeFalse())
+			assert.False(t, unlimitedCfg.Gateway.Routing.RateLimiter.Enabled)
 		})
 	})
 
-	Describe("scaffolding foreign documents", func() {
+	t.Run("scaffolding foreign documents", func(t *testing.T) {
 		foreignDoc := func() *Document {
 			return &Document{
 				OpenAPI: "3.1.0",
@@ -145,69 +157,73 @@ var _ = Describe("ToConfig", func() {
 			}
 		}
 
-		It("builds a single-upstream proxy flow from an operation", func() {
-			cfg, warnings := importDoc(foreignDoc(), ImportOptions{})
+		t.Run("builds a single-upstream proxy flow from an operation", func(t *testing.T) {
+			cfg, warnings := importDoc(t, foreignDoc(), ImportOptions{})
 
-			Expect(cfg.Schema).To(Equal("v1"))
-			Expect(cfg.Gateway.Service.Name).To(Equal("petstore"))
-			Expect(cfg.Gateway.Server.Port).To(Equal(defaultServerPort))
+			assert.Equal(t, "v1", cfg.Schema)
+			assert.Equal(t, "petstore", cfg.Gateway.Service.Name)
+			assert.Equal(t, defaultServerPort, cfg.Gateway.Server.Port)
 
 			flow := cfg.Gateway.Routing.Flows[0]
-			Expect(flow.Path).To(Equal("/pets/{petId}"))
-			Expect(flow.Method).To(Equal("GET"))
-			Expect(flow.Streaming).To(BeFalse())
+			assert.Equal(t, "/pets/{petId}", flow.Path)
+			assert.Equal(t, "GET", flow.Method)
+			assert.False(t, flow.Streaming)
 			// A scaffolded flow always has exactly one upstream, so it is
 			// proxied directly and never aggregates (see Router.dispatch).
-			Expect(flow.Aggregation).To(BeNil())
+			assert.Nil(t, flow.Aggregation)
 
 			up := flow.Upstreams[0]
-			Expect(up.Name).To(Equal("getpetbyid"))
-			Expect(up.Hosts).To(HaveExactElements("https://petstore.example.com"))
-			Expect(up.Path).To(Equal("/pets/{petId}"))
-			Expect(up.ForwardQueries).To(HaveExactElements("verbose"))
-			Expect(up.ForwardHeaders).To(HaveExactElements("X-Store-Id"))
+			assert.Equal(t, "getpetbyid", up.Name)
+			assert.Equal(t, aastro.AddrList{"https://petstore.example.com"}, up.Hosts)
+			assert.Equal(t, "/pets/{petId}", up.Path)
+			assert.Equal(t, []string{"verbose"}, up.ForwardQueries)
+			assert.Equal(t, []string{"X-Store-Id"}, up.ForwardHeaders)
 
-			Expect(warnings).To(ContainElement(HaveField("Message", ContainSubstring("security requirement"))))
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return strings.Contains(w.Message, "security requirement")
+			})
 		})
 
-		It("prefers --default-host over servers[] and warns when neither exists", func() {
-			cfg, _ := importDoc(foreignDoc(), ImportOptions{DefaultHost: "https://internal:8080"})
-			Expect(cfg.Gateway.Routing.Flows[0].Upstreams[0].Hosts).To(HaveExactElements("https://internal:8080"))
+		t.Run("prefers --default-host over servers[] and warns when neither exists", func(t *testing.T) {
+			cfg, _ := importDoc(t, foreignDoc(), ImportOptions{DefaultHost: "https://internal:8080"})
+			assert.Equal(t, aastro.AddrList{"https://internal:8080"}, cfg.Gateway.Routing.Flows[0].Upstreams[0].Hosts)
 
 			bare := foreignDoc()
 			bare.Servers = nil
 
-			cfg, warnings := importDoc(bare, ImportOptions{})
-			Expect(cfg.Gateway.Routing.Flows[0].Upstreams[0].Hosts).To(HaveExactElements(placeholderHost))
-			Expect(warnings).To(ContainElement(HaveField("Message", ContainSubstring("placeholder host"))))
+			cfg, warnings := importDoc(t, bare, ImportOptions{})
+			assert.Equal(t, aastro.AddrList{placeholderHost}, cfg.Gateway.Routing.Flows[0].Upstreams[0].Hosts)
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return strings.Contains(w.Message, "placeholder host")
+			})
 		})
 
-		It("scaffolds streaming flows when requested", func() {
-			cfg, _ := importDoc(foreignDoc(), ImportOptions{Mode: "streaming"})
+		t.Run("scaffolds streaming flows when requested", func(t *testing.T) {
+			cfg, _ := importDoc(t, foreignDoc(), ImportOptions{Mode: "streaming"})
 
 			flow := cfg.Gateway.Routing.Flows[0]
-			Expect(flow.Streaming).To(BeTrue())
-			Expect(flow.Aggregation).To(BeNil())
+			assert.True(t, flow.Streaming)
+			assert.Nil(t, flow.Aggregation)
 		})
 
-		It("orders flows deterministically by path and method", func() {
+		t.Run("orders flows deterministically by path and method", func(t *testing.T) {
 			doc := foreignDoc()
 			doc.Paths["/a"] = &PathItem{
 				Post: &Operation{Responses: map[string]*Response{"200": {Description: "ok"}}},
 				Get:  &Operation{Responses: map[string]*Response{"200": {Description: "ok"}}},
 			}
 
-			first, _ := importDoc(doc, ImportOptions{})
-			second, _ := importDoc(doc, ImportOptions{})
+			first, _ := importDoc(t, doc, ImportOptions{})
+			second, _ := importDoc(t, doc, ImportOptions{})
 
-			Expect(second).To(Equal(first))
-			Expect(first.Gateway.Routing.Flows[0].Path).To(Equal("/a"))
-			Expect(first.Gateway.Routing.Flows[0].Method).To(Equal("GET"))
-			Expect(first.Gateway.Routing.Flows[1].Method).To(Equal("POST"))
+			assert.Equal(t, first, second)
+			assert.Equal(t, "/a", first.Gateway.Routing.Flows[0].Path)
+			assert.Equal(t, "GET", first.Gateway.Routing.Flows[0].Method)
+			assert.Equal(t, "POST", first.Gateway.Routing.Flows[1].Method)
 		})
 	})
 
-	Describe("policy, transport, and TLS round-trip", func() {
+	t.Run("policy, transport, and TLS round-trip", func(t *testing.T) {
 		richUpstream := func() aastro.UpstreamConfig {
 			u := minimalUpstream("billing")
 			u.TLS = aastro.TLSConfig{Enabled: true}
@@ -228,48 +244,52 @@ var _ = Describe("ToConfig", func() {
 			return u
 		}
 
-		It("restores policy and transport losslessly and keeps the fixpoint", func() {
+		t.Run("restores policy and transport losslessly and keeps the fixpoint", func(t *testing.T) {
 			original := configWith(false, mergeFlow("/a", false, "", richUpstream()))
 
-			firstDoc, _ := generate(original, Options{Extensions: true})
-			imported, warnings := importDoc(firstDoc, ImportOptions{})
+			firstDoc, _ := generate(t, original, Options{Extensions: true})
+			imported, warnings := importDoc(t, firstDoc, ImportOptions{})
 
 			up := imported.Gateway.Routing.Flows[0].Upstreams[0]
-			Expect(up.Policy.RetryConfig.MaxRetries).To(Equal(3))
-			Expect(up.Policy.RetryConfig.RetryOnStatuses).To(HaveExactElements(500, 502, 503))
-			Expect(up.Policy.RetryConfig.BackoffDelay).To(Equal(200 * time.Millisecond))
-			Expect(up.Policy.CircuitBreakerConfig.Enabled).To(BeTrue())
-			Expect(up.Policy.CircuitBreakerConfig.ResetTimeout).To(Equal(10 * time.Second))
-			Expect(up.Policy.LoadBalancingConfig.Mode).To(Equal("least_conns"))
-			Expect(up.Policy.HeaderBlacklist).To(HaveExactElements("X-Internal-Token"))
-			Expect(up.Policy.MaxResponseBodySize).To(Equal(int64(1 << 20)))
-			Expect(up.Policy.FollowRedirects).To(BeTrue())
-			Expect(up.Transport.MaxIdleConns).To(Equal(100))
-			Expect(up.Transport.IdleConnTimeout).To(Equal(90 * time.Second))
-			Expect(up.TLS.Enabled).To(BeTrue())
-			Expect(warnings).To(ContainElement(HaveField("Message", ContainSubstring("system roots"))))
+			assert.Equal(t, 3, up.Policy.RetryConfig.MaxRetries)
+			assert.Equal(t, []int{500, 502, 503}, up.Policy.RetryConfig.RetryOnStatuses)
+			assert.Equal(t, 200*time.Millisecond, up.Policy.RetryConfig.BackoffDelay)
+			assert.True(t, up.Policy.CircuitBreakerConfig.Enabled)
+			assert.Equal(t, 10*time.Second, up.Policy.CircuitBreakerConfig.ResetTimeout)
+			assert.Equal(t, "least_conns", up.Policy.LoadBalancingConfig.Mode)
+			assert.Equal(t, []string{"X-Internal-Token"}, up.Policy.HeaderBlacklist)
+			assert.Equal(t, int64(1<<20), up.Policy.MaxResponseBodySize)
+			assert.True(t, up.Policy.FollowRedirects)
+			assert.Equal(t, 100, up.Transport.MaxIdleConns)
+			assert.Equal(t, 90*time.Second, up.Transport.IdleConnTimeout)
+			assert.True(t, up.TLS.Enabled)
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return strings.Contains(w.Message, "system roots")
+			})
 
-			secondDoc, _ := generate(imported, Options{Extensions: true})
-			Expect(secondDoc).To(Equal(firstDoc))
+			secondDoc, _ := generate(t, imported, Options{Extensions: true})
+			assert.Equal(t, firstDoc, secondDoc)
 		})
 
-		It("warns about plugins by name", func() {
+		t.Run("warns about plugins by name", func(t *testing.T) {
 			f := mergeFlow("/a", false, "", minimalUpstream("u"))
 			f.Plugins = []aastro.PluginConfig{
 				{Name: "snakeify", Source: "builtin"},
 				{Name: "tenant_resolver", Source: "file", Path: "/plugins/"},
 			}
 
-			doc, _ := generate(configWith(false, f), Options{Extensions: true})
-			cfg, warnings := importDoc(doc, ImportOptions{})
+			doc, _ := generate(t, configWith(false, f), Options{Extensions: true})
+			cfg, warnings := importDoc(t, doc, ImportOptions{})
 
-			Expect(cfg.Gateway.Routing.Flows[0].Plugins).To(BeEmpty())
-			Expect(warnings).To(ContainElement(HaveField("Message", ContainSubstring("snakeify, tenant_resolver"))))
+			assert.Empty(t, cfg.Gateway.Routing.Flows[0].Plugins)
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return strings.Contains(w.Message, "snakeify, tenant_resolver")
+			})
 		})
 	})
 
-	Describe("scaffold heuristics", func() {
-		It("detects streamed operations and scaffolds them as streaming", func() {
+	t.Run("scaffold heuristics", func(t *testing.T) {
+		t.Run("detects streamed operations and scaffolds them as streaming", func(t *testing.T) {
 			doc := foreign()
 			doc.Paths["/stream"] = &PathItem{
 				Get: &Operation{
@@ -279,7 +299,7 @@ var _ = Describe("ToConfig", func() {
 				},
 			}
 
-			cfg, warnings := importDoc(doc, ImportOptions{})
+			cfg, warnings := importDoc(t, doc, ImportOptions{})
 
 			var streamFlow *aastro.FlowConfig
 
@@ -289,55 +309,56 @@ var _ = Describe("ToConfig", func() {
 				}
 			}
 
-			Expect(streamFlow).NotTo(BeNil())
-			Expect(streamFlow.Streaming).To(BeTrue())
-			Expect(streamFlow.Aggregation).To(BeNil())
-			Expect(warnings).To(ContainElement(SatisfyAll(
-				HaveField("Flow", "GET /stream"),
-				HaveField("Message", ContainSubstring("streaming")),
-			)))
+			require.NotNil(t, streamFlow)
+			assert.True(t, streamFlow.Streaming)
+			assert.Nil(t, streamFlow.Aggregation)
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return w.Flow == "GET /stream" && strings.Contains(w.Message, "streaming")
+			})
 		})
 
-		It("warns when an aastroctl-generated document lacks per-operation extensions", func() {
+		t.Run("warns when an aastroctl-generated document lacks per-operation extensions", func(t *testing.T) {
 			doc := foreign()
 			doc.XAastro = &RootExtension{Schema: "v1", Generator: "aastroctl/0.7.0"}
 
-			_, warnings := importDoc(doc, ImportOptions{})
+			_, warnings := importDoc(t, doc, ImportOptions{})
 
-			Expect(warnings).To(ContainElement(HaveField("Message", ContainSubstring("--extensions"))))
+			assertWarningMatches(t, warnings, func(w Warning) bool {
+				return strings.Contains(w.Message, "--extensions")
+			})
 		})
 
-		It("does not warn about extensions for foreign or extension-carrying documents", func() {
-			_, warnings := importDoc(foreign(), ImportOptions{})
+		t.Run("does not warn about extensions for foreign or extension-carrying documents", func(t *testing.T) {
+			_, warnings := importDoc(t, foreign(), ImportOptions{})
 			for _, w := range warnings {
-				Expect(w.Message).NotTo(ContainSubstring("--extensions"))
+				assert.NotContains(t, w.Message, "--extensions")
 			}
 
-			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{Extensions: true})
-			_, warnings = importDoc(doc, ImportOptions{})
+			doc, _ := generate(t, configWith(false, streamingFlow("/s")), Options{Extensions: true})
+			_, warnings = importDoc(t, doc, ImportOptions{})
 			for _, w := range warnings {
-				Expect(w.Message).NotTo(ContainSubstring("--extensions"))
+				assert.NotContains(t, w.Message, "--extensions")
 			}
 		})
 	})
 
-	Describe("input validation", func() {
-		It("rejects nil documents", func() {
+	t.Run("input validation", func(t *testing.T) {
+		t.Run("rejects nil documents", func(t *testing.T) {
 			_, _, err := ToConfig(nil, ImportOptions{})
-			Expect(err).To(MatchError("nil document"))
+			assert.EqualError(t, err, "nil document")
 		})
 
-		It("rejects documents without operations", func() {
+		t.Run("rejects documents without operations", func(t *testing.T) {
 			_, _, err := ToConfig(&Document{Paths: map[string]*PathItem{}}, ImportOptions{})
-			Expect(err).To(MatchError(ContainSubstring("no operations")))
+			assert.ErrorContains(t, err, "no operations")
 		})
 
-		It("rejects unknown import modes", func() {
+		t.Run("rejects unknown import modes", func(t *testing.T) {
 			_, _, err := ToConfig(foreign(), ImportOptions{Mode: "hybrid"})
-			Expect(err).To(MatchError(ContainSubstring("unsupported import mode")))
+			assert.ErrorContains(t, err, "unsupported import mode")
 		})
 	})
-})
+}
 
 func foreign() *Document {
 	return &Document{

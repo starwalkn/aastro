@@ -2,10 +2,11 @@ package openapi
 
 import (
 	"encoding/json"
+	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/starwalkn/aastro"
 )
@@ -62,427 +63,465 @@ func authMiddlewareConfig(cfg map[string]interface{}) aastro.MiddlewareConfig {
 	return aastro.MiddlewareConfig{Name: "auth", Source: "builtin", Config: cfg}
 }
 
-func generate(cfg aastro.Config, opts Options) (*Document, []Warning) {
-	GinkgoHelper()
+func generate(t *testing.T, cfg aastro.Config, opts Options) (*Document, []Warning) {
+	t.Helper()
 
 	doc, warnings, err := FromConfig(cfg, opts)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(doc).NotTo(BeNil())
+	require.NoError(t, err)
+	require.NotNil(t, doc)
 
 	return doc, warnings
 }
 
-var _ = Describe("FromConfig", func() {
-	Describe("document skeleton", func() {
-		It("defaults info.title to the service name and version to 0.0.0", func() {
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
+func TestFromConfig_DocumentSkeleton(t *testing.T) {
+	t.Run("defaults info.title to the service name and version to 0.0.0", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
 
-			Expect(doc.OpenAPI).To(Equal("3.1.0"))
-			Expect(doc.Info.Title).To(Equal("aastro"))
-			Expect(doc.Info.Version).To(Equal("0.0.0"))
-		})
-
-		It("honors title, api version, and servers overrides", func() {
-			doc, _ := generate(
-				configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))),
-				Options{Title: "My API", APIVersion: "1.2.3", Servers: []string{"https://api.example.com", "https://staging.example.com"}},
-			)
-
-			Expect(doc.Info.Title).To(Equal("My API"))
-			Expect(doc.Info.Version).To(Equal("1.2.3"))
-			Expect(doc.Servers).To(HaveExactElements(
-				Server{URL: "https://api.example.com"},
-				Server{URL: "https://staging.example.com"},
-			))
-		})
-
-		It("emits 3.0.3 when OASVersion is 3.0", func() {
-			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{OASVersion: "3.0"})
-
-			Expect(doc.OpenAPI).To(Equal("3.0.3"))
-		})
-
-		It("rejects unsupported OAS versions", func() {
-			_, _, err := FromConfig(configWith(false, streamingFlow("/s")), Options{OASVersion: "2.0"})
-
-			Expect(err).To(MatchError(ContainSubstring("unsupported OpenAPI version")))
-		})
-
-		It("stamps the generator version into the root extension", func() {
-			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{GeneratorVersion: "0.7.0"})
-
-			Expect(doc.XAastro).NotTo(BeNil())
-			Expect(doc.XAastro.Schema).To(Equal("v1"))
-			Expect(doc.XAastro.Generator).To(Equal("aastroctl/0.7.0"))
-		})
-
-		It("derives tags from the first path segment", func() {
-			doc, _ := generate(configWith(false,
-				mergeFlow("/api/v1/a", false, "", minimalUpstream("u")),
-				mergeFlow("/internal/b", false, "", minimalUpstream("u")),
-			), Options{})
-
-			Expect(doc.Tags).To(HaveExactElements(Tag{Name: "api"}, Tag{Name: "internal"}))
-			Expect(doc.Paths["/api/v1/a"].Get.Tags).To(ConsistOf("api"))
-		})
-
-		It("is deterministic across invocations", func() {
-			cfg := configWith(true,
-				mergeFlow("/a/{id}", true, "error", minimalUpstream("u1"), minimalUpstream("u2")),
-				streamingFlow("/s"),
-			)
-
-			first, _ := generate(cfg, Options{Extensions: true})
-			second, _ := generate(cfg, Options{Extensions: true})
-
-			Expect(second).To(Equal(first))
-		})
+		assert.Equal(t, "3.1.0", doc.OpenAPI)
+		assert.Equal(t, "aastro", doc.Info.Title)
+		assert.Equal(t, "0.0.0", doc.Info.Version)
 	})
 
-	Describe("response derivation", func() {
-		It("always includes the base envelope statuses for a multi-upstream flow", func() {
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u1"), minimalUpstream("u2"))), Options{})
+	t.Run("honors title, api version, and servers overrides", func(t *testing.T) {
+		doc, _ := generate(t,
+			configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))),
+			Options{Title: "My API", APIVersion: "1.2.3", Servers: []string{"https://api.example.com", "https://staging.example.com"}},
+		)
 
-			responses := doc.Paths["/a"].Get.Responses
-			Expect(responses).To(HaveKey("200"))
-			Expect(responses).To(HaveKey("413"))
-			Expect(responses).To(HaveKey("500"))
-			Expect(responses).To(HaveKey("502"))
-			Expect(responses["200"].Content).To(HaveKey("application/json"))
-			Expect(responses["200"].Content["application/json"].Schema).To(BeNil())
-			Expect(responses["502"].Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
-		})
+		assert.Equal(t, "My API", doc.Info.Title)
+		assert.Equal(t, "1.2.3", doc.Info.Version)
+		assert.Equal(t, []Server{
+			{URL: "https://api.example.com"},
+			{URL: "https://staging.example.com"},
+		}, doc.Servers)
+	})
 
-		It("documents a single-upstream flow as an opaque proxy, not the envelope", func() {
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
+	t.Run("emits 3.0.3 when OASVersion is 3.0", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, streamingFlow("/s")), Options{OASVersion: "3.0"})
 
-			responses := doc.Paths["/a"].Get.Responses
-			Expect(responses).To(HaveKey("200"))
-			Expect(responses).To(HaveKey("413"))
-			Expect(responses).To(HaveKey("500"))
-			Expect(responses).To(HaveKey("502"))
-			Expect(responses).NotTo(HaveKey("default"))
+		assert.Equal(t, "3.0.3", doc.OpenAPI)
+	})
 
-			Expect(responses["200"].Content).To(HaveKey("*/*"))
-			Expect(responses["200"].Content["*/*"].Schema).To(BeNil())
-			Expect(responses["502"].Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
-		})
+	t.Run("rejects unsupported OAS versions", func(t *testing.T) {
+		_, _, err := FromConfig(configWith(false, streamingFlow("/s")), Options{OASVersion: "2.0"})
 
-		DescribeTable("206 appears only for best-effort multi-upstream flows",
-			func(bestEffort bool, upstreamCount int, want bool) {
-				ups := make([]aastro.UpstreamConfig, 0, upstreamCount)
-				for range upstreamCount {
+		assert.ErrorContains(t, err, "unsupported OpenAPI version")
+	})
+
+	t.Run("stamps the generator version into the root extension", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, streamingFlow("/s")), Options{GeneratorVersion: "0.7.0"})
+
+		require.NotNil(t, doc.XAastro)
+		assert.Equal(t, "v1", doc.XAastro.Schema)
+		assert.Equal(t, "aastroctl/0.7.0", doc.XAastro.Generator)
+	})
+
+	t.Run("derives tags from the first path segment", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false,
+			mergeFlow("/api/v1/a", false, "", minimalUpstream("u")),
+			mergeFlow("/internal/b", false, "", minimalUpstream("u")),
+		), Options{})
+
+		assert.Equal(t, []Tag{{Name: "api"}, {Name: "internal"}}, doc.Tags)
+		assert.ElementsMatch(t, []string{"api"}, doc.Paths["/api/v1/a"].Get.Tags)
+	})
+
+	t.Run("is deterministic across invocations", func(t *testing.T) {
+		cfg := configWith(true,
+			mergeFlow("/a/{id}", true, "error", minimalUpstream("u1"), minimalUpstream("u2")),
+			streamingFlow("/s"),
+		)
+
+		first, _ := generate(t, cfg, Options{Extensions: true})
+		second, _ := generate(t, cfg, Options{Extensions: true})
+
+		assert.Equal(t, first, second)
+	})
+}
+
+func TestFromConfig_ResponseDerivation(t *testing.T) {
+	t.Run("always includes the base envelope statuses for a multi-upstream flow", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", minimalUpstream("u1"), minimalUpstream("u2"))), Options{})
+
+		responses := doc.Paths["/a"].Get.Responses
+		assert.Contains(t, responses, "200")
+		assert.Contains(t, responses, "413")
+		assert.Contains(t, responses, "500")
+		assert.Contains(t, responses, "502")
+		assert.Contains(t, responses["200"].Content, "application/json")
+		assert.Nil(t, responses["200"].Content["application/json"].Schema)
+		assert.Equal(t, schemaProblemDetails, responses["502"].Content["application/problem+json"].Schema.Ref)
+	})
+
+	t.Run("documents a single-upstream flow as an opaque proxy, not the envelope", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
+
+		responses := doc.Paths["/a"].Get.Responses
+		assert.Contains(t, responses, "200")
+		assert.Contains(t, responses, "413")
+		assert.Contains(t, responses, "500")
+		assert.Contains(t, responses, "502")
+		assert.NotContains(t, responses, "default")
+
+		assert.Contains(t, responses["200"].Content, "*/*")
+		assert.Nil(t, responses["200"].Content["*/*"].Schema)
+		assert.Equal(t, schemaProblemDetails, responses["502"].Content["application/problem+json"].Schema.Ref)
+	})
+
+	t.Run("206 appears only for best-effort multi-upstream flows", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			bestEffort    bool
+			upstreamCount int
+			want          bool
+		}{
+			{"best-effort with two upstreams", true, 2, true},
+			{"best-effort with one upstream", true, 1, false},
+			{"strict with two upstreams", false, 2, false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				ups := make([]aastro.UpstreamConfig, 0, tt.upstreamCount)
+				for range tt.upstreamCount {
 					ups = append(ups, minimalUpstream("u"))
 				}
 
-				doc, _ := generate(configWith(false, mergeFlow("/a", bestEffort, "", ups...)), Options{})
+				doc, _ := generate(t, configWith(false, mergeFlow("/a", tt.bestEffort, "", ups...)), Options{})
 
-				if want {
-					Expect(doc.Paths["/a"].Get.Responses).To(HaveKey("206"))
+				if tt.want {
+					assert.Contains(t, doc.Paths["/a"].Get.Responses, "206")
 				} else {
-					Expect(doc.Paths["/a"].Get.Responses).NotTo(HaveKey("206"))
+					assert.NotContains(t, doc.Paths["/a"].Get.Responses, "206")
 				}
-			},
-			Entry("best-effort with two upstreams", true, 2, true),
-			Entry("best-effort with one upstream", true, 1, false),
-			Entry("strict with two upstreams", false, 2, false),
-		)
+			})
+		}
+	})
 
-		It("documents X-Partial-Errors only on the 206 response", func() {
-			doc, _ := generate(configWith(false, mergeFlow("/a", true, "", minimalUpstream("u1"), minimalUpstream("u2"))), Options{})
+	t.Run("documents X-Partial-Errors only on the 206 response", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", true, "", minimalUpstream("u1"), minimalUpstream("u2"))), Options{})
 
-			responses := doc.Paths["/a"].Get.Responses
-			Expect(responses["206"].Headers).To(HaveKey("X-Partial-Errors"))
-			Expect(responses["206"].Content["application/json"].Schema).To(BeNil())
-			Expect(responses["200"].Headers).NotTo(HaveKey("X-Partial-Errors"))
-		})
+		responses := doc.Paths["/a"].Get.Responses
+		assert.Contains(t, responses["206"].Headers, "X-Partial-Errors")
+		assert.Nil(t, responses["206"].Content["application/json"].Schema)
+		assert.NotContains(t, responses["200"].Headers, "X-Partial-Errors")
+	})
 
-		DescribeTable("409 appears only under on_conflict: error",
-			func(policy string, want bool) {
-				doc, _ := generate(
-					configWith(false, mergeFlow("/a", false, policy, minimalUpstream("u1"), minimalUpstream("u2"))),
+	t.Run("409 appears only under on_conflict: error", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			policy string
+			want   bool
+		}{
+			{"error policy", "error", true},
+			{"prefer policy", "prefer", false},
+			{"overwrite policy", "overwrite", false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				doc, _ := generate(t,
+					configWith(false, mergeFlow("/a", false, tt.policy, minimalUpstream("u1"), minimalUpstream("u2"))),
 					Options{},
 				)
 
-				if want {
-					Expect(doc.Paths["/a"].Get.Responses).To(HaveKey("409"))
+				if tt.want {
+					assert.Contains(t, doc.Paths["/a"].Get.Responses, "409")
 				} else {
-					Expect(doc.Paths["/a"].Get.Responses).NotTo(HaveKey("409"))
+					assert.NotContains(t, doc.Paths["/a"].Get.Responses, "409")
 				}
-			},
-			Entry("error policy", "error", true),
-			Entry("prefer policy", "prefer", false),
-			Entry("overwrite policy", "overwrite", false),
+			})
+		}
+	})
+
+	t.Run("ties 429 to the rate limiter for both flow kinds", func(t *testing.T) {
+		limited, _ := generate(t, configWith(true, mergeFlow("/a", false, "", minimalUpstream("u")), streamingFlow("/s")), Options{})
+		unlimited, _ := generate(t, configWith(false, mergeFlow("/a", false, "", minimalUpstream("u")), streamingFlow("/s")), Options{})
+
+		assert.Contains(t, limited.Paths["/a"].Get.Responses, "429")
+		assert.Contains(t, limited.Paths["/s"].Get.Responses, "429")
+		assert.NotContains(t, unlimited.Paths["/a"].Get.Responses, "429")
+		assert.NotContains(t, unlimited.Paths["/s"].Get.Responses, "429")
+	})
+
+	t.Run("models streaming as streamed */* without 413", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, streamingFlow("/s")), Options{})
+
+		responses := doc.Paths["/s"].Get.Responses
+		assert.Contains(t, responses, "200")
+		assert.Contains(t, responses, "502")
+		assert.NotContains(t, responses, "413")
+		assert.Contains(t, responses["200"].Content, "*/*")
+		assert.Nil(t, responses["200"].Content["*/*"].Schema)
+	})
+
+	t.Run("adds a request body only for body-carrying methods", func(t *testing.T) {
+		post := mergeFlow("/a", false, "", minimalUpstream("u"))
+		post.Method = "POST"
+
+		doc, _ := generate(t, configWith(false, post, mergeFlow("/b", false, "", minimalUpstream("u"))), Options{})
+
+		assert.NotNil(t, doc.Paths["/a"].Post.RequestBody)
+		assert.Nil(t, doc.Paths["/b"].Get.RequestBody)
+	})
+
+	t.Run("notes proxy semantics in the description for a single upstream", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
+
+		assert.Contains(t, doc.Paths["/a"].Get.Description, "Proxy flow")
+	})
+
+	t.Run("describes the shared-status rule for multi-upstream flows", func(t *testing.T) {
+		doc, _ := generate(t,
+			configWith(false, mergeFlow("/a", false, "", minimalUpstream("u1"), minimalUpstream("u2"))),
+			Options{},
 		)
 
-		It("ties 429 to the rate limiter for both flow kinds", func() {
-			limited, _ := generate(configWith(true, mergeFlow("/a", false, "", minimalUpstream("u")), streamingFlow("/s")), Options{})
-			unlimited, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u")), streamingFlow("/s")), Options{})
+		assert.Contains(t, doc.Paths["/a"].Get.Responses["default"].Description, "every failing upstream")
+	})
+}
 
-			Expect(limited.Paths["/a"].Get.Responses).To(HaveKey("429"))
-			Expect(limited.Paths["/s"].Get.Responses).To(HaveKey("429"))
-			Expect(unlimited.Paths["/a"].Get.Responses).NotTo(HaveKey("429"))
-			Expect(unlimited.Paths["/s"].Get.Responses).NotTo(HaveKey("429"))
-		})
+func TestFromConfig_AuthMiddlewareMapping(t *testing.T) {
+	authFlow := func(path string, mwCfg map[string]interface{}) aastro.FlowConfig {
+		f := mergeFlow(path, false, "", minimalUpstream("u"))
+		f.Middlewares = []aastro.MiddlewareConfig{authMiddlewareConfig(mwCfg)}
 
-		It("models streaming as streamed */* without 413", func() {
-			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{})
+		return f
+	}
 
-			responses := doc.Paths["/s"].Get.Responses
-			Expect(responses).To(HaveKey("200"))
-			Expect(responses).To(HaveKey("502"))
-			Expect(responses).NotTo(HaveKey("413"))
-			Expect(responses["200"].Content).To(HaveKey("*/*"))
-			Expect(responses["200"].Content["*/*"].Schema).To(BeNil())
-		})
+	t.Run("registers the bearer security scheme once and applies it per operation", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false,
+			authFlow("/secured", map[string]interface{}{"issuer": "https://idp", "audience": "api"}),
+			mergeFlow("/open", false, "", minimalUpstream("u")),
+		), Options{})
 
-		It("adds a request body only for body-carrying methods", func() {
-			post := mergeFlow("/a", false, "", minimalUpstream("u"))
-			post.Method = "POST"
+		assert.Contains(t, doc.Components.SecuritySchemes, securitySchemeBearer)
+		assert.Equal(t, "bearer", doc.Components.SecuritySchemes[securitySchemeBearer].Scheme)
 
-			doc, _ := generate(configWith(false, post, mergeFlow("/b", false, "", minimalUpstream("u"))), Options{})
+		assert.Equal(t, []map[string][]string{{securitySchemeBearer: {}}}, doc.Paths["/secured"].Get.Security)
+		assert.Contains(t, doc.Paths["/secured"].Get.Responses, "401")
+		assert.Contains(t, doc.Paths["/secured"].Get.Description, "issued by `https://idp` for audience `api`")
 
-			Expect(doc.Paths["/a"].Post.RequestBody).NotTo(BeNil())
-			Expect(doc.Paths["/b"].Get.RequestBody).To(BeNil())
-		})
-
-		It("notes proxy semantics in the description for a single upstream", func() {
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
-
-			Expect(doc.Paths["/a"].Get.Description).To(ContainSubstring("Proxy flow"))
-		})
-
-		It("describes the shared-status rule for multi-upstream flows", func() {
-			doc, _ := generate(
-				configWith(false, mergeFlow("/a", false, "", minimalUpstream("u1"), minimalUpstream("u2"))),
-				Options{},
-			)
-
-			Expect(doc.Paths["/a"].Get.Responses["default"].Description).To(ContainSubstring("every failing upstream"))
-		})
+		assert.Empty(t, doc.Paths["/open"].Get.Security)
+		assert.NotContains(t, doc.Paths["/open"].Get.Responses, "401")
 	})
 
-	Describe("auth middleware mapping", func() {
-		authFlow := func(path string, mwCfg map[string]interface{}) aastro.FlowConfig {
-			f := mergeFlow(path, false, "", minimalUpstream("u"))
-			f.Middlewares = []aastro.MiddlewareConfig{authMiddlewareConfig(mwCfg)}
+	t.Run("models 401 with only the WWW-Authenticate header", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, authFlow("/secured", nil)), Options{})
 
-			return f
+		resp := doc.Paths["/secured"].Get.Responses["401"]
+		assert.Len(t, resp.Headers, 1)
+		assert.Contains(t, resp.Headers, "WWW-Authenticate")
+		assert.Equal(t, schemaProblemDetails, resp.Content["application/problem+json"].Schema.Ref)
+	})
+
+	t.Run("omits the security scheme when no flow uses auth", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, mergeFlow("/open", false, "", minimalUpstream("u"))), Options{})
+
+		assert.Empty(t, doc.Components.SecuritySchemes)
+	})
+
+	t.Run("ignores a file-sourced middleware named auth", func(t *testing.T) {
+		f := mergeFlow("/a", false, "", minimalUpstream("u"))
+		f.Middlewares = []aastro.MiddlewareConfig{{Name: "auth", Source: "file", Path: "/plugins/"}}
+
+		doc, _ := generate(t, configWith(false, f), Options{})
+
+		assert.Empty(t, doc.Paths["/a"].Get.Security)
+		assert.NotContains(t, doc.Paths["/a"].Get.Responses, "401")
+	})
+}
+
+func TestFromConfig_ParameterDerivation(t *testing.T) {
+	t.Run("extracts path params in order and dedupes repeats", func(t *testing.T) {
+		doc, _ := generate(t,
+			configWith(false, mergeFlow("/a/{id}/b/{name}/c/{id}", false, "", minimalUpstream("u"))),
+			Options{},
+		)
+
+		params := doc.Paths["/a/{id}/b/{name}/c/{id}"].Get.Parameters
+		require.Len(t, params, 2)
+		assert.Equal(t, Parameter{Name: "id", In: "path", Required: true, Schema: &Schema{Type: "string"}}, params[0])
+		assert.Equal(t, "name", params[1].Name)
+	})
+
+	t.Run("unions forwarded queries and headers across upstreams, sorted", func(t *testing.T) {
+		u1 := minimalUpstream("u1")
+		u1.ForwardQueries = []string{"expand", "fields"}
+		u1.ForwardHeaders = []string{"X-Tenant-Id"}
+
+		u2 := minimalUpstream("u2")
+		u2.ForwardQueries = []string{"expand", "limit"}
+		u2.ForwardHeaders = []string{"Accept-Language"}
+
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", u1, u2)), Options{})
+
+		var queries, headers []string
+
+		for _, p := range doc.Paths["/a"].Get.Parameters {
+			switch p.In {
+			case "query":
+				queries = append(queries, p.Name)
+			case "header":
+				headers = append(headers, p.Name)
+			}
 		}
 
-		It("registers the bearer security scheme once and applies it per operation", func() {
-			doc, _ := generate(configWith(false,
-				authFlow("/secured", map[string]interface{}{"issuer": "https://idp", "audience": "api"}),
-				mergeFlow("/open", false, "", minimalUpstream("u")),
-			), Options{})
-
-			Expect(doc.Components.SecuritySchemes).To(HaveKey(securitySchemeBearer))
-			Expect(doc.Components.SecuritySchemes[securitySchemeBearer].Scheme).To(Equal("bearer"))
-
-			Expect(doc.Paths["/secured"].Get.Security).To(HaveExactElements(map[string][]string{securitySchemeBearer: {}}))
-			Expect(doc.Paths["/secured"].Get.Responses).To(HaveKey("401"))
-			Expect(doc.Paths["/secured"].Get.Description).To(ContainSubstring("issued by `https://idp` for audience `api`"))
-
-			Expect(doc.Paths["/open"].Get.Security).To(BeEmpty())
-			Expect(doc.Paths["/open"].Get.Responses).NotTo(HaveKey("401"))
-		})
-
-		It("models 401 with only the WWW-Authenticate header", func() {
-			doc, _ := generate(configWith(false, authFlow("/secured", nil)), Options{})
-
-			resp := doc.Paths["/secured"].Get.Responses["401"]
-			Expect(resp.Headers).To(HaveLen(1))
-			Expect(resp.Headers).To(HaveKey("WWW-Authenticate"))
-			Expect(resp.Content["application/problem+json"].Schema.Ref).To(Equal(schemaProblemDetails))
-		})
-
-		It("omits the security scheme when no flow uses auth", func() {
-			doc, _ := generate(configWith(false, mergeFlow("/open", false, "", minimalUpstream("u"))), Options{})
-
-			Expect(doc.Components.SecuritySchemes).To(BeEmpty())
-		})
-
-		It("ignores a file-sourced middleware named auth", func() {
-			f := mergeFlow("/a", false, "", minimalUpstream("u"))
-			f.Middlewares = []aastro.MiddlewareConfig{{Name: "auth", Source: "file", Path: "/plugins/"}}
-
-			doc, _ := generate(configWith(false, f), Options{})
-
-			Expect(doc.Paths["/a"].Get.Security).To(BeEmpty())
-			Expect(doc.Paths["/a"].Get.Responses).NotTo(HaveKey("401"))
-		})
+		assert.Equal(t, []string{"expand", "fields", "limit"}, queries)
+		assert.Equal(t, []string{"Accept-Language", "X-Tenant-Id"}, headers)
 	})
 
-	Describe("parameter derivation", func() {
-		It("extracts path params in order and dedupes repeats", func() {
-			doc, _ := generate(
-				configWith(false, mergeFlow("/a/{id}/b/{name}/c/{id}", false, "", minimalUpstream("u"))),
-				Options{},
-			)
+	t.Run("drops Accept, Content-Type, and Authorization header params regardless of case", func(t *testing.T) {
+		u := minimalUpstream("u")
+		u.ForwardHeaders = []string{"authorization", "Content-Type", "ACCEPT", "X-Keep-Me"}
 
-			params := doc.Paths["/a/{id}/b/{name}/c/{id}"].Get.Parameters
-			Expect(params).To(HaveLen(2))
-			Expect(params[0]).To(Equal(Parameter{Name: "id", In: "path", Required: true, Schema: &Schema{Type: "string"}}))
-			Expect(params[1].Name).To(Equal("name"))
-		})
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", u)), Options{})
 
-		It("unions forwarded queries and headers across upstreams, sorted", func() {
-			u1 := minimalUpstream("u1")
-			u1.ForwardQueries = []string{"expand", "fields"}
-			u1.ForwardHeaders = []string{"X-Tenant-Id"}
+		var headers []string
 
-			u2 := minimalUpstream("u2")
-			u2.ForwardQueries = []string{"expand", "limit"}
-			u2.ForwardHeaders = []string{"Accept-Language"}
-
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", u1, u2)), Options{})
-
-			var queries, headers []string
-
-			for _, p := range doc.Paths["/a"].Get.Parameters {
-				switch p.In {
-				case "query":
-					queries = append(queries, p.Name)
-				case "header":
-					headers = append(headers, p.Name)
-				}
+		for _, p := range doc.Paths["/a"].Get.Parameters {
+			if p.In == "header" {
+				headers = append(headers, p.Name)
 			}
+		}
 
-			Expect(queries).To(HaveExactElements("expand", "fields", "limit"))
-			Expect(headers).To(HaveExactElements("Accept-Language", "X-Tenant-Id"))
-		})
-
-		It("drops Accept, Content-Type, and Authorization header params regardless of case", func() {
-			u := minimalUpstream("u")
-			u.ForwardHeaders = []string{"authorization", "Content-Type", "ACCEPT", "X-Keep-Me"}
-
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", u)), Options{})
-
-			var headers []string
-
-			for _, p := range doc.Paths["/a"].Get.Parameters {
-				if p.In == "header" {
-					headers = append(headers, p.Name)
-				}
-			}
-
-			Expect(headers).To(HaveExactElements("X-Keep-Me"))
-		})
-
-		It("moves wildcards and prefix patterns into the description", func() {
-			u := minimalUpstream("u")
-			u.ForwardQueries = []string{"*"}
-			u.ForwardHeaders = []string{"X-Custom-*"}
-
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", u)), Options{})
-
-			op := doc.Paths["/a"].Get
-			Expect(op.Parameters).To(BeEmpty())
-			Expect(op.Description).To(ContainSubstring("All query parameters are forwarded"))
-			Expect(op.Description).To(ContainSubstring("X-Custom-*"))
-		})
+		assert.Equal(t, []string{"X-Keep-Me"}, headers)
 	})
 
-	Describe("QUERY method and warnings", func() {
-		It("emits QUERY flows under x-aastro-query with a warning", func() {
-			f := mergeFlow("/search", false, "", minimalUpstream("u"))
-			f.Method = "QUERY"
+	t.Run("moves wildcards and prefix patterns into the description", func(t *testing.T) {
+		u := minimalUpstream("u")
+		u.ForwardQueries = []string{"*"}
+		u.ForwardHeaders = []string{"X-Custom-*"}
 
-			doc, warnings := generate(configWith(false, f), Options{})
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", u)), Options{})
 
-			item := doc.Paths["/search"]
-			Expect(item.Get).To(BeNil())
-			Expect(item.XAastroQuery).NotTo(BeNil())
-			Expect(item.XAastroQuery.RequestBody).NotTo(BeNil())
+		op := doc.Paths["/a"].Get
+		assert.Empty(t, op.Parameters)
+		assert.Contains(t, op.Description, "All query parameters are forwarded")
+		assert.Contains(t, op.Description, "X-Custom-*")
+	})
+}
 
-			Expect(warnings).To(HaveLen(1))
-			Expect(warnings[0].Flow).To(Equal("QUERY /search"))
-			Expect(warnings[0].Message).To(ContainSubstring("x-aastro-query"))
-		})
+func TestFromConfig_QueryMethodAndWarnings(t *testing.T) {
+	t.Run("emits QUERY flows under x-aastro-query with a warning", func(t *testing.T) {
+		f := mergeFlow("/search", false, "", minimalUpstream("u"))
+		f.Method = "QUERY"
 
-		It("keeps the first operation and warns on duplicate method+path", func() {
-			first := mergeFlow("/dup", false, "", minimalUpstream("first"))
-			second := mergeFlow("/dup", false, "", minimalUpstream("second"))
+		doc, warnings := generate(t, configWith(false, f), Options{})
 
-			doc, warnings := generate(configWith(false, first, second), Options{})
+		item := doc.Paths["/search"]
+		assert.Nil(t, item.Get)
+		require.NotNil(t, item.XAastroQuery)
+		assert.NotNil(t, item.XAastroQuery.RequestBody)
 
-			Expect(doc.Paths["/dup"].Get.Summary).To(ContainSubstring("first"))
-			Expect(warnings).To(HaveLen(1))
-			Expect(warnings[0].Message).To(ContainSubstring("duplicate"))
-		})
+		require.Len(t, warnings, 1)
+		assert.Equal(t, "QUERY /search", warnings[0].Flow)
+		assert.Contains(t, warnings[0].Message, "x-aastro-query")
 	})
 
-	Describe("x-aastro extensions", func() {
-		It("omits the flow extension unless enabled", func() {
-			doc, _ := generate(configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
+	t.Run("keeps the first operation and warns on duplicate method+path", func(t *testing.T) {
+		first := mergeFlow("/dup", false, "", minimalUpstream("first"))
+		second := mergeFlow("/dup", false, "", minimalUpstream("second"))
 
-			Expect(doc.Paths["/a"].Get.XAastro).To(BeNil())
-		})
+		doc, warnings := generate(t, configWith(false, first, second), Options{})
 
-		It("snapshots the flow but never middleware configs", func() {
-			f := mergeFlow("/a", true, "prefer", minimalUpstream("u1"), minimalUpstream("u2"))
-			f.Aggregation.OnConflict.Upstream = "u1"
-			f.Middlewares = []aastro.MiddlewareConfig{
-				{Name: "recoverer", Source: "builtin"},
-				authMiddlewareConfig(map[string]interface{}{
-					"issuer":      "https://idp",
-					"hmac_secret": "SECRET-MARKER-DO-NOT-LEAK",
-				}),
-			}
+		assert.Contains(t, doc.Paths["/dup"].Get.Summary, "first")
+		require.Len(t, warnings, 1)
+		assert.Contains(t, warnings[0].Message, "duplicate")
+	})
+}
 
-			doc, _ := generate(configWith(false, f), Options{Extensions: true})
+func TestFromConfig_XAastroExtensions(t *testing.T) {
+	t.Run("omits the flow extension unless enabled", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, mergeFlow("/a", false, "", minimalUpstream("u"))), Options{})
 
-			ext := doc.Paths["/a"].Get.XAastro
-			Expect(ext).NotTo(BeNil())
-			Expect(ext.Aggregation.Strategy).To(Equal("merge"))
-			Expect(ext.Aggregation.BestEffort).To(BeTrue())
-			Expect(ext.Aggregation.OnConflict.PreferUpstream).To(Equal("u1"))
-			Expect(ext.Middlewares).To(HaveExactElements("recoverer", "auth"))
-			Expect(ext.Upstreams).To(HaveLen(2))
-			Expect(ext.Upstreams[0].Timeout).To(Equal("3s"))
-
-			serialized, err := json.Marshal(doc)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(string(serialized)).NotTo(ContainSubstring("SECRET-MARKER-DO-NOT-LEAK"))
-		})
+		assert.Nil(t, doc.Paths["/a"].Get.XAastro)
 	})
 
-	Describe("components", func() {
-		It("emits problem detail schemas even for streaming-only configs", func() {
-			doc, _ := generate(configWith(false, streamingFlow("/s")), Options{})
+	t.Run("snapshots the flow but never middleware configs", func(t *testing.T) {
+		f := mergeFlow("/a", true, "prefer", minimalUpstream("u1"), minimalUpstream("u2"))
+		f.Aggregation.OnConflict.Upstream = "u1"
+		f.Middlewares = []aastro.MiddlewareConfig{
+			{Name: "recoverer", Source: "builtin"},
+			authMiddlewareConfig(map[string]interface{}{
+				"issuer":      "https://idp",
+				"hmac_secret": "SECRET-MARKER-DO-NOT-LEAK",
+			}),
+		}
 
-			Expect(doc.Components).NotTo(BeNil())
-			Expect(doc.Components.Schemas).To(HaveKey("ProblemDetails"))
-			Expect(doc.Components.Schemas).To(HaveKey("ClientError"))
-			Expect(doc.Components.Schemas).NotTo(HaveKey("ClientResponse"))
-		})
+		doc, _ := generate(t, configWith(false, f), Options{Extensions: true})
+
+		ext := doc.Paths["/a"].Get.XAastro
+		require.NotNil(t, ext)
+		assert.Equal(t, "merge", ext.Aggregation.Strategy)
+		assert.True(t, ext.Aggregation.BestEffort)
+		assert.Equal(t, "u1", ext.Aggregation.OnConflict.PreferUpstream)
+		assert.Equal(t, []string{"recoverer", "auth"}, ext.Middlewares)
+		assert.Len(t, ext.Upstreams, 2)
+		assert.Equal(t, "3s", ext.Upstreams[0].Timeout)
+
+		serialized, err := json.Marshal(doc)
+		require.NoError(t, err)
+		assert.NotContains(t, string(serialized), "SECRET-MARKER-DO-NOT-LEAK")
 	})
-})
+}
 
-var _ = Describe("operationID", func() {
-	DescribeTable("builds stable identifiers",
-		func(method, path, want string) {
-			Expect(operationID(method, path)).To(Equal(want))
+func TestFromConfig_Components(t *testing.T) {
+	t.Run("emits problem detail schemas even for streaming-only configs", func(t *testing.T) {
+		doc, _ := generate(t, configWith(false, streamingFlow("/s")), Options{})
+
+		require.NotNil(t, doc.Components)
+		assert.Contains(t, doc.Components.Schemas, "ProblemDetails")
+		assert.Contains(t, doc.Components.Schemas, "ClientError")
+		assert.NotContains(t, doc.Components.Schemas, "ClientResponse")
+	})
+}
+
+func TestOperationID(t *testing.T) {
+	tests := []struct {
+		name, method, path, want string
+	}{
+		{"path params flattened", "GET", "/api/v2/file/{id}", "get_api_v2_file_id"},
+		{"hyphens sanitized", "GET", "/api/v1/health-check", "get_api_v1_health_check"},
+		{"uppercase method lowered", "POST", "/a/B", "post_a_b"},
+		{"root path", "GET", "/", "get"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, operationID(tt.method, tt.path))
+		})
+	}
+}
+
+func TestAuthNote(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  map[string]interface{}
+		want string
+	}{
+		{
+			"issuer and audience",
+			map[string]interface{}{"issuer": "https://idp", "audience": "api"},
+			"Requires a JWT issued by `https://idp` for audience `api`.",
 		},
-		Entry("path params flattened", "GET", "/api/v2/file/{id}", "get_api_v2_file_id"),
-		Entry("hyphens sanitized", "GET", "/api/v1/health-check", "get_api_v1_health_check"),
-		Entry("uppercase method lowered", "POST", "/a/B", "post_a_b"),
-		Entry("root path", "GET", "/", "get"),
-	)
-})
-
-var _ = Describe("authNote", func() {
-	DescribeTable("describes token requirements from non-secret fields",
-		func(cfg map[string]interface{}, want string) {
-			Expect(authNote(new(authMiddlewareConfig(cfg)))).To(Equal(want))
+		{
+			"issuer only",
+			map[string]interface{}{"issuer": "https://idp"},
+			"Requires a JWT issued by `https://idp`.",
 		},
-		Entry("issuer and audience", map[string]interface{}{"issuer": "https://idp", "audience": "api"},
-			"Requires a JWT issued by `https://idp` for audience `api`."),
-		Entry("issuer only", map[string]interface{}{"issuer": "https://idp"},
-			"Requires a JWT issued by `https://idp`."),
-		Entry("audience only", map[string]interface{}{"audience": "api"},
-			"Requires a JWT for audience `api`."),
-		Entry("neither", map[string]interface{}{}, ""),
-		Entry("nil config", nil, ""),
-	)
-})
+		{
+			"audience only",
+			map[string]interface{}{"audience": "api"},
+			"Requires a JWT for audience `api`.",
+		},
+		{"neither", map[string]interface{}{}, ""},
+		{"nil config", nil, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, authNote(new(authMiddlewareConfig(tt.cfg))))
+		})
+	}
+}

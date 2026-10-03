@@ -49,4 +49,4 @@ lint:
 	golangci-lint run
 
 test:
-	ginkgo -r -p
+	go test ./...

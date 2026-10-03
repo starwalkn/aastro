@@ -83,6 +83,7 @@ linters:
     - gocheckcompilerdirectives # validates go compiler directive comments (//go:)
     - gocognit # computes and checks the cognitive complexity of functions
     - gocritic # provides diagnostics that check for bugs, performance and style issues
+    - gocyclo # computes and checks the cyclomatic complexity of functions
     - godot # checks if comments end in a period
     - gomoddirectives # manages the use of 'replace', 'retract', and 'excludes' directives in go.mod
     - goprintffuncname # checks that printf-like functions are named with f at the end
@@ -124,12 +125,10 @@ linters:
     - errcheck # checking for unchecked errors, these unchecked errors can be critical bugs in some cases
     - nestif # reports deeply nested if statements
     - godox # detects usage of FIXME, TODO and other keywords inside comments
-    - ginkgolinter # [if you use ginkgo/gomega] enforces standards of using ginkgo and gomega
 
     ## you may want to enable
     #- wrapcheck # checks that errors returned from external packages are wrapped
     #- nonamedreturns # reports all named returns
-    #- gocyclo # computes and checks the cyclomatic complexity of functions
     #- sloglint # ensure consistent code style when using log/slog
     #- protogetter # reports direct reads from proto message fields when getters should be used
     #- sqlclosecheck # checks that sql.Rows and sql.Stmt are closed

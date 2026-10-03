@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -22,80 +22,78 @@ func newTestLogger(buf *bytes.Buffer) *zap.Logger {
 	return zap.New(core)
 }
 
-var _ = Describe("Logger", func() {
-	Describe("Handler", func() {
-		It("logs the incoming request", func() {
-			buf := new(bytes.Buffer)
-			m := &Middleware{
-				log:     newTestLogger(buf),
-				enabled: true,
-			}
+func TestLoggerHandler(t *testing.T) {
+	t.Run("logs the incoming request", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		m := &Middleware{
+			log:     newTestLogger(buf),
+			enabled: true,
+		}
 
-			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				time.Sleep(10 * time.Millisecond)
+		h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(10 * time.Millisecond)
 
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("ok"))
-			}))
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ok"))
+		}))
 
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
 
-			h.ServeHTTP(rec, req)
+		h.ServeHTTP(rec, req)
 
-			Expect(rec.Code).To(Equal(http.StatusOK))
+		assert.Equal(t, http.StatusOK, rec.Code)
 
-			logOutput := buf.String()
+		logOutput := buf.String()
 
-			Expect(logOutput).To(ContainSubstring("request started"))
-			Expect(logOutput).To(ContainSubstring("request completed"))
-		})
-
-		It("disabled and noes not log the incoming request", func() {
-			buf := new(bytes.Buffer)
-			m := &Middleware{
-				log:     newTestLogger(buf),
-				enabled: false,
-			}
-
-			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
-			}))
-
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			rec := httptest.NewRecorder()
-
-			h.ServeHTTP(rec, req)
-
-			Expect(rec.Code).To(Equal(http.StatusNoContent))
-			Expect(buf.Len()).To(BeZero())
-		})
-
-		It("logs the incoming request with body", func() {
-			buf := new(bytes.Buffer)
-			m := &Middleware{
-				log:     newTestLogger(buf),
-				enabled: true,
-				logBody: true,
-			}
-
-			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusCreated)
-			}))
-
-			req := httptest.NewRequest(http.MethodGet, "/", bytes.NewBufferString(`{"hello":"world"}`))
-			rec := httptest.NewRecorder()
-
-			h.ServeHTTP(rec, req)
-
-			Expect(rec.Code).To(Equal(http.StatusCreated))
-
-			logOutput := buf.String()
-
-			Expect(logOutput).To(ContainSubstring("request started"))
-			Expect(logOutput).To(ContainSubstring("request completed"))
-			Expect(logOutput).To(ContainSubstring("hello"))
-			Expect(logOutput).To(ContainSubstring("world"))
-		})
+		assert.Contains(t, logOutput, "request started")
+		assert.Contains(t, logOutput, "request completed")
 	})
-})
+
+	t.Run("disabled and noes not log the incoming request", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		m := &Middleware{
+			log:     newTestLogger(buf),
+			enabled: false,
+		}
+
+		h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+		assert.Zero(t, buf.Len())
+	})
+
+	t.Run("logs the incoming request with body", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		m := &Middleware{
+			log:     newTestLogger(buf),
+			enabled: true,
+			logBody: true,
+		}
+
+		h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", bytes.NewBufferString(`{"hello":"world"}`))
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusCreated, rec.Code)
+
+		logOutput := buf.String()
+
+		assert.Contains(t, logOutput, "request started")
+		assert.Contains(t, logOutput, "request completed")
+		assert.Contains(t, logOutput, "hello")
+		assert.Contains(t, logOutput, "world")
+	})
+}

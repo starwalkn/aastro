@@ -5,75 +5,81 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"path/filepath"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/starwalkn/aastro/internal/testutil/certgen"
 )
 
-func served(r *Reloader) int64 {
-	GinkgoHelper()
+func served(t *testing.T, r *Reloader) int64 {
+	t.Helper()
 
 	s, err := certgen.ServedSerial(r.ServerConfig())
-	Expect(err).NotTo(HaveOccurred())
+	require.NoError(t, err)
 
 	return s
 }
 
-var _ = Describe("Reloader", func() {
-	var (
-		dir               string
-		certFile, keyFile string
-		caFile            string
-		ca                *x509.Certificate
-		caKey             *ecdsa.PrivateKey
-	)
+func TestReloader(t *testing.T) {
+	setup := func(t *testing.T) (certFile, keyFile, caFile string, ca *x509.Certificate, caKey *ecdsa.PrivateKey) {
+		t.Helper()
 
-	BeforeEach(func() {
-		dir = GinkgoT().TempDir()
+		dir := t.TempDir()
 		ca, caKey, _ = certgen.NewCA()
 		certFile = filepath.Join(dir, "tls.crt")
 		keyFile = filepath.Join(dir, "tls.key")
 		caFile = filepath.Join(dir, "ca.crt")
-	})
 
-	newReloader := func() *Reloader {
+		return certFile, keyFile, caFile, ca, caKey
+	}
+
+	newReloader := func(t *testing.T, certFile, keyFile string) *Reloader {
+		t.Helper()
+
 		r, err := NewReloader(ReloaderConfig{
 			CertFile: certFile, KeyFile: keyFile, MinVersion: tls.VersionTLS12,
 		})
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
+
 		return r
 	}
 
-	It("serves the new serial after rotation, without restart", func() {
+	t.Run("serves the new serial after rotation, without restart", func(t *testing.T) {
+		certFile, keyFile, _, ca, caKey := setup(t)
+
 		cp, kp := certgen.NewLeaf(ca, caKey, 1001)
 		certgen.WriteAtomic(certFile, cp)
 		certgen.WriteAtomic(keyFile, kp)
 
-		r := newReloader()
-		Expect(served(r)).To(Equal(int64(1001)))
+		r := newReloader(t, certFile, keyFile)
+		assert.Equal(t, int64(1001), served(t, r))
 
 		cp2, kp2 := certgen.NewLeaf(ca, caKey, 2002)
 		certgen.WriteAtomic(keyFile, kp2)
 		certgen.WriteAtomic(certFile, cp2)
-		Expect(r.Load()).To(Succeed())
+		require.NoError(t, r.Load())
 
-		Expect(served(r)).To(Equal(int64(2002)))
+		assert.Equal(t, int64(2002), served(t, r))
 	})
 
-	It("keeps the old cert when the new one on disk is malformed", func() {
+	t.Run("keeps the old cert when the new one on disk is malformed", func(t *testing.T) {
+		certFile, keyFile, _, ca, caKey := setup(t)
+
 		cp, kp := certgen.NewLeaf(ca, caKey, 1001)
 		certgen.WriteAtomic(certFile, cp)
 		certgen.WriteAtomic(keyFile, kp)
-		r := newReloader()
+		r := newReloader(t, certFile, keyFile)
 
 		certgen.WriteAtomic(certFile, []byte("not a certificate"))
-		Expect(r.Load()).To(HaveOccurred())
-		Expect(served(r)).To(Equal(int64(1001)))
+		require.Error(t, r.Load())
+		assert.Equal(t, int64(1001), served(t, r))
 	})
 
-	It("does not swap anything when only the CA fails (partial failure)", func() {
+	t.Run("does not swap anything when only the CA fails (partial failure)", func(t *testing.T) {
+		certFile, keyFile, caFile, ca, caKey := setup(t)
+
 		cp, kp := certgen.NewLeaf(ca, caKey, 1001)
 		certgen.WriteAtomic(certFile, cp)
 		certgen.WriteAtomic(keyFile, kp)
@@ -83,18 +89,20 @@ var _ = Describe("Reloader", func() {
 			CertFile: certFile, KeyFile: keyFile, CAFile: caFile,
 			MinVersion: tls.VersionTLS12,
 		})
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 
 		cp2, kp2 := certgen.NewLeaf(ca, caKey, 2002)
 		certgen.WriteAtomic(certFile, cp2)
 		certgen.WriteAtomic(keyFile, kp2)
 		certgen.WriteAtomic(caFile, []byte("garbage"))
 
-		Expect(r.Load()).To(HaveOccurred())
-		Expect(served(r)).To(Equal(int64(1001)))
+		require.Error(t, r.Load())
+		assert.Equal(t, int64(1001), served(t, r))
 	})
 
-	It("rotates client-CA trust dynamically (GetConfigForClient)", func() {
+	t.Run("rotates client-CA trust dynamically (GetConfigForClient)", func(t *testing.T) {
+		certFile, keyFile, caFile, ca, caKey := setup(t)
+
 		sc, sk := certgen.NewLeaf(ca, caKey, 9000)
 		certgen.WriteAtomic(certFile, sc)
 		certgen.WriteAtomic(keyFile, sk)
@@ -108,24 +116,24 @@ var _ = Describe("Reloader", func() {
 			MinVersion: tls.VersionTLS12,
 			ClientAuth: tls.RequireAndVerifyClientCert,
 		})
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 
 		addr, stop := certgen.StartTLSServer(r.ServerConfig())
-		DeferCleanup(stop)
+		t.Cleanup(stop)
 
 		c1 := certgen.KeyPair(certgen.NewLeaf(ca1, ca1Key, 1))
 		c2 := certgen.KeyPair(certgen.NewLeaf(ca2, ca2Key, 2))
 
-		Expect(certgen.MTLSDial(addr, c1)).To(Succeed())    // CA1 trusted
-		Expect(certgen.MTLSDial(addr, c2)).NotTo(Succeed()) // CA2 not yet
+		require.NoError(t, certgen.MTLSDial(addr, c1)) // CA1 trusted
+		require.Error(t, certgen.MTLSDial(addr, c2))   // CA2 not yet
 
 		certgen.WriteAtomic(caFile, ca2PEM) // rotate trust to CA2
-		Expect(r.Load()).To(Succeed())
+		require.NoError(t, r.Load())
 
-		Expect(certgen.MTLSDial(addr, c1)).NotTo(Succeed()) // CA1 no longer
-		Expect(certgen.MTLSDial(addr, c2)).To(Succeed())    // CA2 now
+		require.Error(t, certgen.MTLSDial(addr, c1))   // CA1 no longer
+		require.NoError(t, certgen.MTLSDial(addr, c2)) // CA2 now
 	})
-})
+}
 
 func mustCAPEM(_ *x509.Certificate) []byte {
 	_, _, pem := certgen.NewCA()

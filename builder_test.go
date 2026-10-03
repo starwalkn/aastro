@@ -4,331 +4,324 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/starwalkn/aastro/internal/tlsutil"
 )
 
-var _ = Describe("builder", func() {
-	Describe("NewRouter", func() {
-		It("builds a complete bundle from a minimal config", func() {
-			cfg := RoutingConfigSet{
-				Service: ServiceConfig{Name: "aastro-test"},
-				Routing: RoutingConfig{
-					Flows: []FlowConfig{{
-						Path:      "/test",
-						Method:    http.MethodGet,
-						Streaming: true,
-						Upstreams: []UpstreamConfig{testUpstreamConfig("7001")},
-					}},
-				},
-			}
+func TestBuilder_NewRouter(t *testing.T) {
+	t.Run("builds a complete bundle from a minimal config", func(t *testing.T) {
+		cfg := RoutingConfigSet{
+			Service: ServiceConfig{Name: "aastro-test"},
+			Routing: RoutingConfig{
+				Flows: []FlowConfig{{
+					Path:      "/test",
+					Method:    http.MethodGet,
+					Streaming: true,
+					Upstreams: []UpstreamConfig{newTestUpstreamConfig("7001")},
+				}},
+			},
+		}
 
-			bundle, err := NewRouter(context.Background(), cfg, zap.NewNop())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(bundle.Router).NotTo(BeNil())
-			Expect(bundle.MeterProvider).NotTo(BeNil())  // noop, но не nil
-			Expect(bundle.TracerProvider).NotTo(BeNil()) // noop
-			Expect(bundle.PromRegistry).To(BeNil())      // metrics не enabled
-		})
-
-		It("returns an error if a flow fails to compile", func() {
-			cfg := RoutingConfigSet{
-				Service: ServiceConfig{Name: "aastro-test"},
-				Routing: RoutingConfig{
-					Flows: []FlowConfig{{
-						Path:      "/bad",
-						Streaming: true,
-						Upstreams: []UpstreamConfig{testUpstreamConfig("7001"), testUpstreamConfig("7002")},
-					}},
-				},
-			}
-
-			_, err := NewRouter(context.Background(), cfg, zap.NewNop())
-			Expect(err).To(MatchError(ContainSubstring("compile flow")))
-		})
+		bundle, err := NewRouter(context.Background(), cfg, zap.NewNop())
+		require.NoError(t, err)
+		assert.NotNil(t, bundle.Router)
+		assert.NotNil(t, bundle.MeterProvider)  // noop, но не nil
+		assert.NotNil(t, bundle.TracerProvider) // noop
+		assert.Nil(t, bundle.PromRegistry)      // metrics не enabled
 	})
 
-	Describe("initRateLimiter", func() {
-		It("returns nil if disabled", func() {
-			cfg := RateLimiterConfig{
-				Enabled: false,
-				Config:  nil,
-			}
+	t.Run("returns an error if a flow fails to compile", func(t *testing.T) {
+		cfg := RoutingConfigSet{
+			Service: ServiceConfig{Name: "aastro-test"},
+			Routing: RoutingConfig{
+				Flows: []FlowConfig{{
+					Path:      "/bad",
+					Streaming: true,
+					Upstreams: []UpstreamConfig{newTestUpstreamConfig("7001"), newTestUpstreamConfig("7002")},
+				}},
+			},
+		}
 
-			rl, err := initRateLimiter(cfg)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(rl).To(BeNil())
-		})
+		_, err := NewRouter(context.Background(), cfg, zap.NewNop())
+		assert.ErrorContains(t, err, "compile flow")
+	})
+}
 
-		It("returns a configured limiter when enabled", func() {
-			cfg := RateLimiterConfig{
-				Enabled: true,
-				Config: map[string]interface{}{
-					"window": "5s",
-					"limit":  10,
-				},
-			}
+func TestBuilder_InitRateLimiter(t *testing.T) {
+	t.Run("returns nil if disabled", func(t *testing.T) {
+		cfg := RateLimiterConfig{
+			Enabled: false,
+			Config:  nil,
+		}
 
-			rl, err := initRateLimiter(cfg)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(rl).NotTo(BeNil())
-		})
+		rl, err := initRateLimiter(cfg)
+		require.NoError(t, err)
+		assert.Nil(t, rl)
 	})
 
-	Describe("parseTrustedProxies", func() {
-		Context("when input is not in CIDR format", func() {
-			It("returns an error", func() {
-				proxies := []string{"127.0.0.1"}
+	t.Run("returns a configured limiter when enabled", func(t *testing.T) {
+		cfg := RateLimiterConfig{
+			Enabled: true,
+			Config: map[string]interface{}{
+				"window": "5s",
+				"limit":  10,
+			},
+		}
 
-				tp, err := parseTrustedProxies(proxies)
-				Expect(err).To(HaveOccurred())
-				Expect(tp).To(BeNil())
-			})
-		})
+		rl, err := initRateLimiter(cfg)
+		require.NoError(t, err)
+		assert.NotNil(t, rl)
+	})
+}
 
-		Context("when input contains valid CIDRs", func() {
-			It("parses all valid CIDRs", func() {
-				proxies := []string{"127.0.0.1/8", "192.168.0.1/32"}
+func TestBuilder_ParseTrustedProxies(t *testing.T) {
+	t.Run("when input is not in CIDR format returns an error", func(t *testing.T) {
+		proxies := []string{"127.0.0.1"}
 
-				tp, err := parseTrustedProxies(proxies)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(tp).NotTo(BeNil())
-				Expect(tp).To(HaveLen(2))
-			})
-		})
+		tp, err := parseTrustedProxies(proxies)
+		require.Error(t, err)
+		assert.Nil(t, tp)
 	})
 
-	Describe("compileFlow", func() {
-		It("rejects streaming flows with multiple upstreams", func() {
-			cfg := FlowConfig{
-				Path:      "/builder/test",
-				Method:    http.MethodGet,
-				Streaming: true,
-				Upstreams: []UpstreamConfig{
-					testUpstreamConfig("7001"),
-					testUpstreamConfig("7002"),
-				},
-			}
+	t.Run("when input contains valid CIDRs parses all valid CIDRs", func(t *testing.T) {
+		proxies := []string{"127.0.0.1/8", "192.168.0.1/32"}
 
-			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
-			Expect(err).To(HaveOccurred())
-			Expect(f).To(BeZero())
-			Expect(err).To(MatchError(ContainSubstring("must have exactly one upstream")))
-		})
+		tp, err := parseTrustedProxies(proxies)
+		require.NoError(t, err)
+		require.NotNil(t, tp)
+		assert.Len(t, tp, 2)
+	})
+}
 
-		It("propagates aggregation initialization errors", func() {
-			cfg := FlowConfig{
-				Path:      "/builder/test",
-				Method:    http.MethodGet,
-				Streaming: false,
-				Upstreams: []UpstreamConfig{
-					testUpstreamConfig("7001"),
-					testUpstreamConfig("7002"),
-				},
-				Aggregation: &AggregationConfig{
-					BestEffort: false,
-					Strategy:   "unknown",
-				},
-			}
+func TestBuilder_CompileFlow(t *testing.T) {
+	t.Run("rejects streaming flows with multiple upstreams", func(t *testing.T) {
+		cfg := FlowConfig{
+			Path:      "/builder/test",
+			Method:    http.MethodGet,
+			Streaming: true,
+			Upstreams: []UpstreamConfig{
+				newTestUpstreamConfig("7001"),
+				newTestUpstreamConfig("7002"),
+			},
+		}
 
-			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
-			Expect(err).To(HaveOccurred())
-			Expect(f).To(BeZero())
-			Expect(err).To(MatchError(ContainSubstring("init aggregation")))
-		})
-
-		It("compiles a streaming flow", func() {
-			cfg := FlowConfig{
-				Path:      "/builder/test",
-				Method:    http.MethodGet,
-				Streaming: true,
-				Upstreams: []UpstreamConfig{
-					testUpstreamConfig("7001"),
-				},
-				Aggregation: &AggregationConfig{
-					BestEffort: true,
-					Strategy:   strategyArray.String(),
-				},
-			}
-
-			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(f).NotTo(BeZero())
-			Expect(f.upstreams).To(HaveLen(1))
-			Expect(f.streaming).To(BeTrue())
-		})
-
-		It("compiles a fan-out flow with aggregation", func() {
-			cfg := FlowConfig{
-				Path:      "/builder/test",
-				Method:    http.MethodGet,
-				Streaming: false,
-				Upstreams: []UpstreamConfig{
-					testUpstreamConfig("7001"),
-					testUpstreamConfig("7002"),
-				},
-				Aggregation: &AggregationConfig{
-					BestEffort: false,
-					Strategy:   strategyNamespace.String(),
-				},
-			}
-
-			f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(f).NotTo(BeZero())
-			Expect(f.upstreams).To(HaveLen(2))
-			Expect(f.streaming).To(BeFalse())
-		})
+		f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
+		require.Error(t, err)
+		assert.Zero(t, f)
+		assert.ErrorContains(t, err, "must have exactly one upstream")
 	})
 
-	Describe("initAggregation", func() {
-		It("fails on unknown strategy", func() {
-			cfg := AggregationConfig{
+	t.Run("propagates aggregation initialization errors", func(t *testing.T) {
+		cfg := FlowConfig{
+			Path:      "/builder/test",
+			Method:    http.MethodGet,
+			Streaming: false,
+			Upstreams: []UpstreamConfig{
+				newTestUpstreamConfig("7001"),
+				newTestUpstreamConfig("7002"),
+			},
+			Aggregation: &AggregationConfig{
 				BestEffort: false,
 				Strategy:   "unknown",
-				OnConflict: nil,
-			}
+			},
+		}
 
-			agg, err := initAggregation(cfg, nil)
-			Expect(err).To(HaveOccurred())
-			Expect(agg).To(BeZero())
-			Expect(err).To(MatchError(ContainSubstring("unknown aggregation strategy")))
-		})
+		f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
+		require.Error(t, err)
+		assert.Zero(t, f)
+		assert.ErrorContains(t, err, "init aggregation")
+	})
 
-		It("with merge strategy fails on unknown conflict policy", func() {
-			cfg := AggregationConfig{
+	t.Run("compiles a streaming flow", func(t *testing.T) {
+		cfg := FlowConfig{
+			Path:      "/builder/test",
+			Method:    http.MethodGet,
+			Streaming: true,
+			Upstreams: []UpstreamConfig{
+				newTestUpstreamConfig("7001"),
+			},
+			Aggregation: &AggregationConfig{
 				BestEffort: true,
-				Strategy:   strategyMerge.String(),
-				OnConflict: &OnConflictConfig{
-					Policy: "unknown",
-				},
-			}
-
-			agg, err := initAggregation(cfg, nil)
-			Expect(err).To(HaveOccurred())
-			Expect(agg).To(BeZero())
-			Expect(err).To(MatchError(ContainSubstring("unknown aggregation conflict policy")))
-		})
-
-		It("applies default conflict policy for non-merge strategies", func() {
-			cfg := AggregationConfig{
-				BestEffort: false,
 				Strategy:   strategyArray.String(),
-				OnConflict: nil,
-			}
+			},
+		}
 
-			agg, err := initAggregation(cfg, nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(agg.strategy.String()).To(Equal(cfg.Strategy))
-			Expect(agg.conflictPolicy).To(Equal(conflictPolicyOverwrite))
-		})
+		f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
+		require.NoError(t, err)
+		assert.NotZero(t, f)
+		assert.Len(t, f.upstreams, 1)
+		assert.True(t, f.streaming)
+	})
 
-		It("with merge strategy and prefer conflict policy fails on non-existent upstream", func() {
-			up := newTestUpstream("test-service:7001")
-
-			cfg := AggregationConfig{
+	t.Run("compiles a fan-out flow with aggregation", func(t *testing.T) {
+		cfg := FlowConfig{
+			Path:      "/builder/test",
+			Method:    http.MethodGet,
+			Streaming: false,
+			Upstreams: []UpstreamConfig{
+				newTestUpstreamConfig("7001"),
+				newTestUpstreamConfig("7002"),
+			},
+			Aggregation: &AggregationConfig{
 				BestEffort: false,
-				Strategy:   strategyMerge.String(),
-				OnConflict: &OnConflictConfig{
-					Policy:   conflictPolicyPrefer.String(),
-					Upstream: "non-existent",
-				},
-			}
+				Strategy:   strategyNamespace.String(),
+			},
+		}
 
-			agg, err := initAggregation(cfg, []upstream{up})
-			Expect(err).To(HaveOccurred())
-			Expect(agg).To(BeZero())
-			Expect(err).To(MatchError(ContainSubstring("preferred upstream for on_conflict policy does not exist")))
-		})
+		f, err := compileFlow(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
+		require.NoError(t, err)
+		assert.NotZero(t, f)
+		assert.Len(t, f.upstreams, 2)
+		assert.False(t, f.streaming)
+	})
+}
 
-		It("succeeds with valid config", func() {
-			up := newTestUpstream("test-service:7001")
+func TestBuilder_InitAggregation(t *testing.T) {
+	t.Run("fails on unknown strategy", func(t *testing.T) {
+		cfg := AggregationConfig{
+			BestEffort: false,
+			Strategy:   "unknown",
+			OnConflict: nil,
+		}
 
-			cfg := AggregationConfig{
-				BestEffort: true,
-				Strategy:   strategyMerge.String(),
-				OnConflict: &OnConflictConfig{
-					Policy: conflictPolicyFirst.String(),
-				},
-			}
-
-			agg, err := initAggregation(cfg, []upstream{up})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(agg.strategy.String()).To(Equal(cfg.Strategy))
-			Expect(agg.conflictPolicy).To(Equal(conflictPolicyFirst))
-			Expect(agg.bestEffort).To(BeTrue())
-		})
-
-		Describe("buildUpstream", func() {
-			It("successfully builds upstream from valid config", func() {
-				cfg := UpstreamConfig{
-					Name:    "",
-					Hosts:   AddrList{"test-service:7001", "test-service:7002"},
-					Path:    "/builder/test",
-					Method:  http.MethodGet,
-					Timeout: 5 * time.Second,
-				}
-
-				u, err := buildUpstream(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
-				Expect(err).NotTo(HaveOccurred())
-				Expect(u).NotTo(BeNil())
-				Expect(u.name()).To(Equal("get-test-service:7001-test-service:7002"))
-			})
-		})
-
-		Describe("buildUpstreamTransport", func() {
-			It("defaults to HTTP/1.1 only without TLS", func() {
-				t := buildUpstreamTransport(UpstreamConfig{}, nil)
-				Expect(t.Protocols).To(BeNil())
-			})
-
-			It("negotiates HTTP/2 over TLS by default (auto)", func() {
-				t := buildUpstreamTransport(UpstreamConfig{}, &tls.Config{})
-				Expect(t.Protocols).NotTo(BeNil())
-				Expect(t.Protocols.HTTP1()).To(BeTrue())
-				Expect(t.Protocols.HTTP2()).To(BeTrue())
-			})
-
-			It("negotiates HTTP/2 over TLS when explicitly on", func() {
-				cfg := UpstreamConfig{Transport: TransportConfig{HTTP2: "on"}}
-
-				t := buildUpstreamTransport(cfg, &tls.Config{})
-				Expect(t.Protocols).NotTo(BeNil())
-				Expect(t.Protocols.HTTP1()).To(BeTrue())
-				Expect(t.Protocols.HTTP2()).To(BeTrue())
-			})
-
-			It("pins the transport to HTTP/1.1 when off, even over TLS", func() {
-				cfg := UpstreamConfig{Transport: TransportConfig{HTTP2: "off"}}
-
-				t := buildUpstreamTransport(cfg, &tls.Config{})
-				Expect(t.Protocols).NotTo(BeNil())
-				Expect(t.Protocols.HTTP1()).To(BeTrue())
-				Expect(t.Protocols.HTTP2()).To(BeFalse())
-			})
-		})
+		agg, err := initAggregation(cfg, nil)
+		require.Error(t, err)
+		assert.Zero(t, agg)
+		assert.ErrorContains(t, err, "unknown aggregation strategy")
 	})
 
-	Describe("buildUpstreamPolicy", func() {
-		It("matches a blacklist entry regardless of its case", func() {
-			// Regression test: entries were used as map keys verbatim, but
-			// net/http always stores response headers in net/textproto
-			// canonical form - a config value like "x-secret" silently never
-			// matched the "X-Secret" key filterHeaders actually sees.
-			policy := buildUpstreamPolicy(PolicyConfig{
-				HeaderBlacklist: []string{"x-secret", "X-ALREADY-CANONICAL-ISH"},
-			})
+	t.Run("with merge strategy fails on unknown conflict policy", func(t *testing.T) {
+		cfg := AggregationConfig{
+			BestEffort: true,
+			Strategy:   strategyMerge.String(),
+			OnConflict: &OnConflictConfig{
+				Policy: "unknown",
+			},
+		}
 
-			_, blocksLowercase := policy.headerBlacklist["X-Secret"]
-			Expect(blocksLowercase).To(BeTrue())
-
-			_, blocksOther := policy.headerBlacklist["X-Already-Canonical-Ish"]
-			Expect(blocksOther).To(BeTrue())
-		})
+		agg, err := initAggregation(cfg, nil)
+		require.Error(t, err)
+		assert.Zero(t, agg)
+		assert.ErrorContains(t, err, "unknown aggregation conflict policy")
 	})
-})
+
+	t.Run("applies default conflict policy for non-merge strategies", func(t *testing.T) {
+		cfg := AggregationConfig{
+			BestEffort: false,
+			Strategy:   strategyArray.String(),
+			OnConflict: nil,
+		}
+
+		agg, err := initAggregation(cfg, nil)
+		require.NoError(t, err)
+		assert.Equal(t, cfg.Strategy, agg.strategy.String())
+		assert.Equal(t, conflictPolicyOverwrite, agg.conflictPolicy)
+	})
+
+	t.Run("with merge strategy and prefer conflict policy fails on non-existent upstream", func(t *testing.T) {
+		up := newTestUpstream("test-service:7001")
+
+		cfg := AggregationConfig{
+			BestEffort: false,
+			Strategy:   strategyMerge.String(),
+			OnConflict: &OnConflictConfig{
+				Policy:   conflictPolicyPrefer.String(),
+				Upstream: "non-existent",
+			},
+		}
+
+		agg, err := initAggregation(cfg, []upstream{up})
+		require.Error(t, err)
+		assert.Zero(t, agg)
+		assert.ErrorContains(t, err, "preferred upstream for on_conflict policy does not exist")
+	})
+
+	t.Run("succeeds with valid config", func(t *testing.T) {
+		up := newTestUpstream("test-service:7001")
+
+		cfg := AggregationConfig{
+			BestEffort: true,
+			Strategy:   strategyMerge.String(),
+			OnConflict: &OnConflictConfig{
+				Policy: conflictPolicyFirst.String(),
+			},
+		}
+
+		agg, err := initAggregation(cfg, []upstream{up})
+		require.NoError(t, err)
+		assert.Equal(t, cfg.Strategy, agg.strategy.String())
+		assert.Equal(t, conflictPolicyFirst, agg.conflictPolicy)
+		assert.True(t, agg.bestEffort)
+	})
+
+	t.Run("buildUpstream successfully builds upstream from valid config", func(t *testing.T) {
+		cfg := UpstreamConfig{
+			Name:    "",
+			Hosts:   AddrList{"test-service:7001", "test-service:7002"},
+			Path:    "/builder/test",
+			Method:  http.MethodGet,
+			Timeout: 5 * time.Second,
+		}
+
+		u, err := buildUpstream(cfg, nil, nil, tlsutil.NewRegistry(), zap.NewNop())
+		require.NoError(t, err)
+		require.NotNil(t, u)
+		assert.Equal(t, "get-test-service:7001-test-service:7002", u.name())
+	})
+}
+
+func TestBuildUpstreamTransport(t *testing.T) {
+	t.Run("defaults to HTTP/1.1 only without TLS", func(t *testing.T) {
+		tr := buildUpstreamTransport(UpstreamConfig{}, nil)
+		assert.Nil(t, tr.Protocols)
+	})
+
+	t.Run("negotiates HTTP/2 over TLS by default (auto)", func(t *testing.T) {
+		tr := buildUpstreamTransport(UpstreamConfig{}, &tls.Config{})
+		require.NotNil(t, tr.Protocols)
+		assert.True(t, tr.Protocols.HTTP1())
+		assert.True(t, tr.Protocols.HTTP2())
+	})
+
+	t.Run("negotiates HTTP/2 over TLS when explicitly on", func(t *testing.T) {
+		cfg := UpstreamConfig{Transport: TransportConfig{HTTP2: "on"}}
+
+		tr := buildUpstreamTransport(cfg, &tls.Config{})
+		require.NotNil(t, tr.Protocols)
+		assert.True(t, tr.Protocols.HTTP1())
+		assert.True(t, tr.Protocols.HTTP2())
+	})
+
+	t.Run("pins the transport to HTTP/1.1 when off, even over TLS", func(t *testing.T) {
+		cfg := UpstreamConfig{Transport: TransportConfig{HTTP2: "off"}}
+
+		tr := buildUpstreamTransport(cfg, &tls.Config{})
+		require.NotNil(t, tr.Protocols)
+		assert.True(t, tr.Protocols.HTTP1())
+		assert.False(t, tr.Protocols.HTTP2())
+	})
+}
+
+func TestBuildUpstreamPolicy(t *testing.T) {
+	t.Run("matches a blacklist entry regardless of its case", func(t *testing.T) {
+		// Regression test: entries were used as map keys verbatim, but
+		// net/http always stores response headers in net/textproto
+		// canonical form - a config value like "x-secret" silently never
+		// matched the "X-Secret" key filterHeaders actually sees.
+		policy := buildUpstreamPolicy(PolicyConfig{
+			HeaderBlacklist: []string{"x-secret", "X-ALREADY-CANONICAL-ISH"},
+		})
+
+		_, blocksLowercase := policy.headerBlacklist["X-Secret"]
+		assert.True(t, blocksLowercase)
+
+		_, blocksOther := policy.headerBlacklist["X-Already-Canonical-Ish"]
+		assert.True(t, blocksOther)
+	})
+}

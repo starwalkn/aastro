@@ -5,11 +5,12 @@ import (
 	"crypto/tls"
 	"path/filepath"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/starwalkn/aastro/internal/certwatcher"
@@ -41,9 +42,9 @@ func (r *countingRegistry) count(dir string) int {
 	return r.calls[dir]
 }
 
-var _ = Describe("Watcher", func() {
-	It("reloads after a rotation in a watched directory", func() {
-		dir := GinkgoT().TempDir()
+func TestWatcher(t *testing.T) {
+	t.Run("reloads after a rotation in a watched directory", func(t *testing.T) {
+		dir := t.TempDir()
 		certFile := filepath.Join(dir, "tls.crt")
 		keyFile := filepath.Join(dir, "tls.key")
 
@@ -55,50 +56,50 @@ var _ = Describe("Watcher", func() {
 		r, err := tlsutil.NewReloader(tlsutil.ReloaderConfig{
 			CertFile: certFile, KeyFile: keyFile, MinVersion: tls.VersionTLS12,
 		})
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 
 		reg := tlsutil.NewRegistry()
 		reg.Register(r)
 
 		w, err := fsnotify.NewWatcher()
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 		for _, d := range reg.Dirs() {
-			Expect(w.Add(d)).To(Succeed())
+			require.NoError(t, w.Add(d))
 		}
 
 		cw := certwatcher.New(w, reg, zap.NewNop(),
 			certwatcher.WithDebounce(20*time.Millisecond))
 
 		ctx, cancel := context.WithCancel(context.Background())
-		DeferCleanup(cancel)
+		t.Cleanup(cancel)
 		go cw.Run(ctx)
 
 		cp2, kp2 := certgen.NewLeaf(ca, caKey, 2002)
 		certgen.WriteAtomic(keyFile, kp2)
 		certgen.WriteAtomic(certFile, cp2)
 
-		Eventually(func() int64 {
+		assert.Eventually(t, func() bool {
 			s, _ := certgen.ServedSerial(r.ServerConfig())
-			return s
-		}, 2*time.Second, 20*time.Millisecond).Should(Equal(int64(2002)))
+			return s == 2002
+		}, 2*time.Second, 20*time.Millisecond)
 	})
 
-	It("coalesces a burst of events into far fewer reloads", func() {
-		dir := GinkgoT().TempDir()
+	t.Run("coalesces a burst of events into far fewer reloads", func(t *testing.T) {
+		dir := t.TempDir()
 		target := filepath.Join(dir, "tls.crt")
 		certgen.WriteAtomic(target, []byte("x"))
 
 		fake := &countingRegistry{dirs: []string{dir}, calls: map[string]int{}}
 
 		w, err := fsnotify.NewWatcher()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(w.Add(dir)).To(Succeed())
+		require.NoError(t, err)
+		require.NoError(t, w.Add(dir))
 
 		cw := certwatcher.New(w, fake, zap.NewNop(),
 			certwatcher.WithDebounce(120*time.Millisecond))
 
 		ctx, cancel := context.WithCancel(context.Background())
-		DeferCleanup(cancel)
+		t.Cleanup(cancel)
 		go cw.Run(ctx)
 
 		const burst = 10
@@ -106,18 +107,16 @@ var _ = Describe("Watcher", func() {
 			certgen.WriteAtomic(target, []byte{byte(i)})
 		}
 
-		Eventually(func() int { return fake.count(dir) }, time.Second).
-			Should(BeNumerically(">=", 1))
-		Consistently(func() int { return fake.count(dir) }, 300*time.Millisecond).
-			Should(BeNumerically("<=", 2))
+		assert.Eventually(t, func() bool { return fake.count(dir) >= 1 }, time.Second, 10*time.Millisecond)
+		assert.Never(t, func() bool { return fake.count(dir) > 2 }, 300*time.Millisecond, 10*time.Millisecond)
 	})
 
-	It("stops cleanly when the context is cancelled", func() {
-		dir := GinkgoT().TempDir()
+	t.Run("stops cleanly when the context is cancelled", func(t *testing.T) {
+		dir := t.TempDir()
 
 		w, err := fsnotify.NewWatcher()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(w.Add(dir)).To(Succeed())
+		require.NoError(t, err)
+		require.NoError(t, w.Add(dir))
 
 		cw := certwatcher.New(w,
 			&countingRegistry{dirs: []string{dir}, calls: map[string]int{}},
@@ -128,6 +127,13 @@ var _ = Describe("Watcher", func() {
 		go func() { cw.Run(ctx); close(done) }()
 
 		cancel()
-		Eventually(done).Should(BeClosed())
+		assert.Eventually(t, func() bool {
+			select {
+			case _, ok := <-done:
+				return !ok
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
 	})
-})
+}

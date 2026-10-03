@@ -2,158 +2,170 @@ package aastro
 
 import (
 	"errors"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
-var _ = Describe("Aggregator", func() {
-	var agg *defaultAggregator
+func TestAggregator_MergeStrategy(t *testing.T) {
+	agg := &defaultAggregator{}
+	responses := []upstreamResponse{
+		okResponse(`{"a":1,"b":2}`),
+		okResponse(`{"b":99,"c":4}`),
+	}
 
-	BeforeEach(func() {
-		agg = &defaultAggregator{}
-	})
+	t.Run("conflict policies", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			policy   conflictPolicy
+			expected string
+		}{
+			{"overwrite uses last value", conflictPolicyOverwrite, `{"a":1,"b":99,"c":4}`},
+			{"first preserves earliest value", conflictPolicyFirst, `{"a":1,"b":2,"c":4}`},
+		}
 
-	Describe("merge strategy", func() {
-		var responses []upstreamResponse
-
-		BeforeEach(func() {
-			responses = []upstreamResponse{
-				okResponse(`{"a":1,"b":2}`),
-				okResponse(`{"b":99,"c":4}`),
-			}
-		})
-
-		DescribeTable("conflict policies",
-			func(policy conflictPolicy, expected string) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 				result := agg.aggregate(nil, responses, aggregation{
 					strategy:       strategyMerge,
-					conflictPolicy: policy,
+					conflictPolicy: tt.policy,
 				}, zap.NewNop())
 
-				Expect(result.errors).To(BeEmpty())
-				jsonEqual(expected, result.data)
+				assert.Empty(t, result.errors)
+				jsonEqual(t, tt.expected, result.data)
+			})
+		}
+	})
+
+	t.Run("returns conflict error when policy is error", func(t *testing.T) {
+		result := agg.aggregate(nil, responses, aggregation{
+			strategy:       strategyMerge,
+			conflictPolicy: conflictPolicyError,
+		}, zap.NewNop())
+
+		assert.Nil(t, result.data)
+		assert.ElementsMatch(t, []ClientError{ClientErrValueConflict}, result.errors)
+	})
+
+	t.Run("returns partial result when best effort and one upstream fails", func(t *testing.T) {
+		result := agg.aggregate(
+			nil,
+			[]upstreamResponse{
+				okResponse(`{"a":1}`),
+				errResponse(upstreamTimeout),
 			},
-			Entry("overwrite uses last value", conflictPolicyOverwrite, `{"a":1,"b":99,"c":4}`),
-			Entry("first preserves earliest value", conflictPolicyFirst, `{"a":1,"b":2,"c":4}`),
+			aggregation{
+				strategy:       strategyMerge,
+				bestEffort:     true,
+				conflictPolicy: conflictPolicyOverwrite,
+			},
+			zap.NewNop(),
 		)
 
-		It("returns conflict error when policy is error", func() {
-			result := agg.aggregate(nil, responses, aggregation{
-				strategy:       strategyMerge,
-				conflictPolicy: conflictPolicyError,
-			}, zap.NewNop())
+		assert.True(t, result.partial)
+		assert.ElementsMatch(t, []ClientError{ClientErrUpstreamUnavailable}, result.errors)
+		jsonEqual(t, `{"a":1}`, result.data)
+	})
+}
 
-			Expect(result.data).To(BeNil())
-			Expect(result.errors).To(ConsistOf(ClientErrValueConflict))
-		})
+func TestAggregator_ArrayStrategy(t *testing.T) {
+	agg := &defaultAggregator{}
 
-		It("returns partial result when best effort and one upstream fails", func() {
-			result := agg.aggregate(
-				nil,
-				[]upstreamResponse{
-					okResponse(`{"a":1}`),
-					errResponse(upstreamTimeout),
-				},
-				aggregation{
-					strategy:       strategyMerge,
-					bestEffort:     true,
-					conflictPolicy: conflictPolicyOverwrite,
-				},
-				zap.NewNop(),
-			)
+	t.Run("aggregates responses into an array", func(t *testing.T) {
+		result := agg.aggregate(
+			nil,
+			[]upstreamResponse{
+				okResponse(`{"x":1}`),
+				okResponse(`{"y":2}`),
+			},
+			aggregation{strategy: strategyArray},
+			zap.NewNop(),
+		)
 
-			Expect(result.partial).To(BeTrue())
-			Expect(result.errors).To(ConsistOf(ClientErrUpstreamUnavailable))
-			jsonEqual(`{"a":1}`, result.data)
-		})
+		assert.Empty(t, result.errors)
+		assert.False(t, result.partial)
+		jsonEqual(t, `[{"x":1},{"y":2}]`, result.data)
 	})
 
-	Describe("array strategy", func() {
-		It("aggregates responses into an array", func() {
-			result := agg.aggregate(
-				nil,
-				[]upstreamResponse{
-					okResponse(`{"x":1}`),
-					okResponse(`{"y":2}`),
-				},
-				aggregation{strategy: strategyArray},
-				zap.NewNop(),
-			)
+	t.Run("skips failed upstream when best effort", func(t *testing.T) {
+		result := agg.aggregate(
+			nil,
+			[]upstreamResponse{
+				okResponse(`{"x":1}`),
+				errResponse(upstreamBadStatus),
+			},
+			aggregation{strategy: strategyArray, bestEffort: true},
+			zap.NewNop(),
+		)
 
-			Expect(result.errors).To(BeEmpty())
-			Expect(result.partial).To(BeFalse())
-			jsonEqual(`[{"x":1},{"y":2}]`, result.data)
-		})
+		assert.True(t, result.partial)
+		assert.ElementsMatch(t, []ClientError{ClientErrUpstreamError}, result.errors)
+		jsonEqual(t, `[{"x":1}]`, result.data)
+	})
+}
 
-		It("skips failed upstream when best effort", func() {
-			result := agg.aggregate(
-				nil,
-				[]upstreamResponse{
-					okResponse(`{"x":1}`),
-					errResponse(upstreamBadStatus),
-				},
-				aggregation{strategy: strategyArray, bestEffort: true},
-				zap.NewNop(),
-			)
+func TestAggregator_NamespaceStrategy(t *testing.T) {
+	agg := &defaultAggregator{}
 
-			Expect(result.partial).To(BeTrue())
-			Expect(result.errors).To(ConsistOf(ClientErrUpstreamError))
-			jsonEqual(`[{"x":1}]`, result.data)
-		})
+	t.Run("groups responses by upstream name", func(t *testing.T) {
+		result := agg.aggregate(
+			mockUpstreams("users", "orders"),
+			[]upstreamResponse{
+				okResponse(`{"id":1}`),
+				okResponse(`{"total":99}`),
+			},
+			aggregation{strategy: strategyNamespace},
+			zap.NewNop(),
+		)
+
+		assert.Empty(t, result.errors)
+		jsonEqual(t, `{"users":{"id":1},"orders":{"total":99}}`, result.data)
 	})
 
-	Describe("namespace strategy", func() {
-		It("groups responses by upstream name", func() {
-			result := agg.aggregate(
-				mockUpstreams("users", "orders"),
-				[]upstreamResponse{
-					okResponse(`{"id":1}`),
-					okResponse(`{"total":99}`),
-				},
-				aggregation{strategy: strategyNamespace},
-				zap.NewNop(),
-			)
+	t.Run("omits failed upstream when best effort", func(t *testing.T) {
+		result := agg.aggregate(
+			mockUpstreams("users", "orders"),
+			[]upstreamResponse{
+				okResponse(`{"id":1}`),
+				errResponse(upstreamTimeout),
+			},
+			aggregation{strategy: strategyNamespace, bestEffort: true},
+			zap.NewNop(),
+		)
 
-			Expect(result.errors).To(BeEmpty())
-			jsonEqual(`{"users":{"id":1},"orders":{"total":99}}`, result.data)
-		})
+		assert.True(t, result.partial)
+		assert.Len(t, result.errors, 1)
 
-		It("omits failed upstream when best effort", func() {
-			result := agg.aggregate(
-				mockUpstreams("users", "orders"),
-				[]upstreamResponse{
-					okResponse(`{"id":1}`),
-					errResponse(upstreamTimeout),
-				},
-				aggregation{strategy: strategyNamespace, bestEffort: true},
-				zap.NewNop(),
-			)
-
-			Expect(result.partial).To(BeTrue())
-			Expect(result.errors).To(HaveLen(1))
-
-			var got map[string]any
-			Expect(decodeJSONInto(result.data, &got)).To(Succeed())
-			Expect(got).To(HaveKey("users"))
-			Expect(got).ToNot(HaveKey("orders"))
-		})
+		var got map[string]any
+		require.NoError(t, decodeJSONInto(result.data, &got))
+		assert.Contains(t, got, "users")
+		assert.NotContains(t, got, "orders")
 	})
+}
 
-	DescribeTable("mapUpstreamError",
-		func(kind upstreamErrorKind, want ClientError) {
+func TestMapUpstreamError(t *testing.T) {
+	tests := []struct {
+		name string
+		kind upstreamErrorKind
+		want ClientError
+	}{
+		{"timeout → upstream unavailable", upstreamTimeout, ClientErrUpstreamUnavailable},
+		{"connection → upstream unavailable", upstreamConnection, ClientErrUpstreamUnavailable},
+		{"bad status → upstream error", upstreamBadStatus, ClientErrUpstreamError},
+		{"body too large → upstream body too large", upstreamBodyTooLarge, ClientErrUpstreamBodyTooLarge},
+		{"internal → internal", upstreamInternal, ClientErrInternal},
+		{"read error → internal", upstreamReadError, ClientErrInternal},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			got := mapUpstreamError(&upstreamError{
-				kind: kind,
+				kind: tt.kind,
 				err:  errors.New("err"),
 			})
-			Expect(got).To(Equal(want))
-		},
-		Entry("timeout → upstream unavailable", upstreamTimeout, ClientErrUpstreamUnavailable),
-		Entry("connection → upstream unavailable", upstreamConnection, ClientErrUpstreamUnavailable),
-		Entry("bad status → upstream error", upstreamBadStatus, ClientErrUpstreamError),
-		Entry("body too large → upstream body too large", upstreamBodyTooLarge, ClientErrUpstreamBodyTooLarge),
-		Entry("internal → internal", upstreamInternal, ClientErrInternal),
-		Entry("read error → internal", upstreamReadError, ClientErrInternal),
-	)
-})
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

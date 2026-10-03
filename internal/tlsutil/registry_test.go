@@ -6,27 +6,28 @@ import (
 	"crypto/x509"
 	"os"
 	"path/filepath"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/starwalkn/aastro/internal/testutil/certgen"
 )
 
-var _ = Describe("Registry", func() {
-	var (
-		dir   string
-		ca    *x509.Certificate
-		caKey *ecdsa.PrivateKey
-	)
+func TestRegistry(t *testing.T) {
+	setup := func(t *testing.T) (dir string, ca *x509.Certificate, caKey *ecdsa.PrivateKey) {
+		t.Helper()
 
-	BeforeEach(func() {
-		dir = GinkgoT().TempDir()
+		dir = t.TempDir()
 		ca, caKey, _ = certgen.NewCA()
-	})
 
-	reloaderIn := func(d, name string, serial int64) (*Reloader, string, string) {
-		Expect(os.MkdirAll(d, 0o755)).To(Succeed())
+		return dir, ca, caKey
+	}
+
+	reloaderIn := func(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, d, name string, serial int64) (*Reloader, string, string) {
+		t.Helper()
+
+		require.NoError(t, os.MkdirAll(d, 0o755))
 
 		cf := filepath.Join(d, name+".crt")
 		kf := filepath.Join(d, name+".key")
@@ -38,28 +39,31 @@ var _ = Describe("Registry", func() {
 		r, err := NewReloader(ReloaderConfig{
 			CertFile: cf, KeyFile: kf, MinVersion: tls.VersionTLS12,
 		})
-
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 
 		return r, cf, kf
 	}
 
-	It("deduplicates a directory shared by multiple reloaders", func() {
+	t.Run("deduplicates a directory shared by multiple reloaders", func(t *testing.T) {
+		dir, ca, caKey := setup(t)
+
 		shared := filepath.Join(dir, "shared")
-		r1, _, _ := reloaderIn(shared, "a", 1)
-		r2, _, _ := reloaderIn(shared, "b", 2)
+		r1, _, _ := reloaderIn(t, ca, caKey, shared, "a", 1)
+		r2, _, _ := reloaderIn(t, ca, caKey, shared, "b", 2)
 
 		reg := NewRegistry()
 		reg.Register(r1)
 		reg.Register(r2)
 
-		Expect(reg.Dirs()).To(HaveLen(1))
+		assert.Len(t, reg.Dirs(), 1)
 	})
 
-	It("reloads healthy reloaders under a dir and reports the broken one", func() {
+	t.Run("reloads healthy reloaders under a dir and reports the broken one", func(t *testing.T) {
+		dir, ca, caKey := setup(t)
+
 		shared := filepath.Join(dir, "shared")
-		rOK, okCert, okKey := reloaderIn(shared, "ok", 100)
-		rBad, badCert, _ := reloaderIn(shared, "bad", 200)
+		rOK, okCert, okKey := reloaderIn(t, ca, caKey, shared, "ok", 100)
+		rBad, badCert, _ := reloaderIn(t, ca, caKey, shared, "bad", 200)
 
 		reg := NewRegistry()
 		reg.Register(rOK)
@@ -72,7 +76,7 @@ var _ = Describe("Registry", func() {
 
 		errs := reg.ReloadDir(shared)
 
-		Expect(errs).To(HaveLen(1))
-		Expect(served(rOK)).To(Equal(int64(101)))
+		assert.Len(t, errs, 1)
+		assert.Equal(t, int64(101), served(t, rOK))
 	})
-})
+}

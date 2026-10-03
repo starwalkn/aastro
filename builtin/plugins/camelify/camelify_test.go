@@ -1,19 +1,27 @@
 package main
 
 import (
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-var _ = Describe("Camelify", func() {
-	DescribeTable("snakeToCamel",
-		func(input, expected string) {
-			got := snakeToCamel(input)
-			Expect(got).To(Equal(expected))
-		},
-		Entry("simple snake string", "simple_test", "simpleTest"),
-		Entry("verbose snake string", "camel_case_string_for_test", "camelCaseStringForTest"),
-		Entry("already camel string", "alreadyCamel", "alreadyCamel"),
-		Entry("empty string", "", ""),
-	)
-})
+func TestSnakeToCamel(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "simple snake string", input: "simple_test", expected: "simpleTest"},
+		{name: "verbose snake string", input: "camel_case_string_for_test", expected: "camelCaseStringForTest"},
+		{name: "already camel string", input: "alreadyCamel", expected: "alreadyCamel"},
+		{name: "empty string", input: "", expected: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := snakeToCamel(tt.input)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}

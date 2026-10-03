@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -24,64 +25,62 @@ func newTestLogger(buf *bytes.Buffer) *zap.Logger {
 	return zap.New(core)
 }
 
-var _ = Describe("Recoverer", func() {
-	Describe("Handle", func() {
-		It("recovers the panic", func() {
-			buf := new(bytes.Buffer)
-			m := &Middleware{
-				enabled: true,
-				log:     newTestLogger(buf),
-			}
+func TestRecovererHandle(t *testing.T) {
+	t.Run("recovers the panic", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		m := &Middleware{
+			enabled: true,
+			log:     newTestLogger(buf),
+		}
 
-			h := m.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				panic("boom")
-			}))
+		h := m.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			panic("boom")
+		}))
 
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
 
-			h.ServeHTTP(rec, req)
+		h.ServeHTTP(rec, req)
 
-			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(rec.Header().Get("Content-Type")).To(Equal("application/problem+json"))
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
 
-			var problem aastro.ProblemDetails
-			Expect(json.Unmarshal(rec.Body.Bytes(), &problem)).To(Succeed())
-			Expect(problem.Status).To(Equal(http.StatusInternalServerError))
-			Expect(problem.Title).To(Equal("Internal gateway error"))
+		var problem aastro.ProblemDetails
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+		assert.Equal(t, http.StatusInternalServerError, problem.Status)
+		assert.Equal(t, "Internal gateway error", problem.Title)
 
-			logOutput := buf.String()
-			Expect(logOutput).To(ContainSubstring("panic recovered"))
-		})
-
-		It("recovers the panic and include stacktrace", func() {
-			buf := new(bytes.Buffer)
-			m := &Middleware{
-				enabled:      true,
-				log:          newTestLogger(buf),
-				includeStack: true,
-			}
-
-			h := m.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				panic("boom")
-			}))
-
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			rec := httptest.NewRecorder()
-
-			h.ServeHTTP(rec, req)
-
-			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
-			Expect(rec.Header().Get("Content-Type")).To(Equal("application/problem+json"))
-
-			var problem aastro.ProblemDetails
-			Expect(json.Unmarshal(rec.Body.Bytes(), &problem)).To(Succeed())
-			Expect(problem.Status).To(Equal(http.StatusInternalServerError))
-			Expect(problem.Title).To(Equal("Internal gateway error"))
-
-			logOutput := buf.String()
-			Expect(logOutput).To(ContainSubstring("panic recovered"))
-			Expect(logOutput).To(ContainSubstring("stack"))
-		})
+		logOutput := buf.String()
+		assert.Contains(t, logOutput, "panic recovered")
 	})
-})
+
+	t.Run("recovers the panic and include stacktrace", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		m := &Middleware{
+			enabled:      true,
+			log:          newTestLogger(buf),
+			includeStack: true,
+		}
+
+		h := m.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			panic("boom")
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
+
+		var problem aastro.ProblemDetails
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+		assert.Equal(t, http.StatusInternalServerError, problem.Status)
+		assert.Equal(t, "Internal gateway error", problem.Title)
+
+		logOutput := buf.String()
+		assert.Contains(t, logOutput, "panic recovered")
+		assert.Contains(t, logOutput, "stack")
+	})
+}

@@ -12,28 +12,32 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
+	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/goccy/go-json"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/starwalkn/aastro/internal/circuitbreaker"
+	"github.com/starwalkn/aastro/internal/metric"
 	"github.com/starwalkn/aastro/sdk"
 )
 
-// ── Config helpers ────────────────────────────────────────────────────────────
+var testMetrics *metric.Metrics
 
-func testUpstreamConfig(port string) UpstreamConfig {
-	return UpstreamConfig{
-		Name:    "test_service_" + port,
-		Hosts:   AddrList{"test-service:" + port},
-		Path:    "/builder/test",
-		Method:  http.MethodGet,
-		Timeout: 5 * time.Second,
+func TestMain(m *testing.M) {
+	tm, err := metric.New()
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "init test metrics: %v\n", err)
+		os.Exit(1)
 	}
+
+	testMetrics = tm
+
+	os.Exit(m.Run())
 }
 
 // ── Upstream stubs ────────────────────────────────────────────────────────────
@@ -130,6 +134,16 @@ func (m *mockScatter) call(_ *flow, _ *http.Request) (upstreamResponse, bool) {
 
 // ── Builders ──────────────────────────────────────────────────────────────────
 
+func newTestUpstreamConfig(port string) UpstreamConfig {
+	return UpstreamConfig{
+		Name:    "test_service_" + port,
+		Hosts:   AddrList{"test-service:" + port},
+		Path:    "/builder/test",
+		Method:  http.MethodGet,
+		Timeout: 5 * time.Second,
+	}
+}
+
 func newTestRouter(flows []flow, d scatter, a aggregator) *Router {
 	r := &Router{
 		chiRouter:  chi.NewMux(),
@@ -223,11 +237,11 @@ type tlsFixture struct {
 	caKey  *ecdsa.PrivateKey
 }
 
-func newTLSFixture() *tlsFixture {
-	GinkgoHelper()
+func newTLSFixture(t *testing.T) *tlsFixture {
+	t.Helper()
 
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	Expect(err).ToNot(HaveOccurred())
+	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
@@ -240,18 +254,18 @@ func newTLSFixture() *tlsFixture {
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &caKey.PublicKey, caKey)
-	Expect(err).ToNot(HaveOccurred())
+	require.NoError(t, err)
 
 	caCert, err := x509.ParseCertificate(der)
-	Expect(err).ToNot(HaveOccurred())
+	require.NoError(t, err)
 
 	return &tlsFixture{caCert: caCert, caKey: caKey}
 }
 
-func (f *tlsFixture) IssueServerCert() tls.Certificate {
-	GinkgoHelper()
+func (f *tlsFixture) issueServerCert(t *testing.T) tls.Certificate {
+	t.Helper()
 
-	return f.issueCert(certParams{
+	return f.issueCert(t, certParams{
 		cn:          "test-server",
 		eku:         []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		dnsNames:    []string{"localhost"},
@@ -259,16 +273,16 @@ func (f *tlsFixture) IssueServerCert() tls.Certificate {
 	})
 }
 
-func (f *tlsFixture) IssueClientCert(cn string) tls.Certificate {
-	GinkgoHelper()
+func (f *tlsFixture) issueClientCert(t *testing.T, cn string) tls.Certificate {
+	t.Helper()
 
-	return f.issueCert(certParams{
+	return f.issueCert(t, certParams{
 		cn:  cn,
 		eku: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	})
 }
 
-func (f *tlsFixture) CertPool() *x509.CertPool {
+func (f *tlsFixture) certPool() *x509.CertPool {
 	pool := x509.NewCertPool()
 	pool.AddCert(f.caCert)
 	return pool
@@ -281,11 +295,11 @@ type certParams struct {
 	ipAddresses []net.IP
 }
 
-func (f *tlsFixture) issueCert(p certParams) tls.Certificate {
-	GinkgoHelper()
+func (f *tlsFixture) issueCert(t *testing.T, p certParams) tls.Certificate {
+	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	Expect(err).ToNot(HaveOccurred())
+	require.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
@@ -299,7 +313,7 @@ func (f *tlsFixture) issueCert(p certParams) tls.Certificate {
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, f.caCert, &key.PublicKey, f.caKey)
-	Expect(err).ToNot(HaveOccurred())
+	require.NoError(t, err)
 
 	return tls.Certificate{
 		Certificate: [][]byte{der},
@@ -365,18 +379,20 @@ func mustParseCIDR(cidr string) *net.IPNet {
 
 // ── Assertions ────────────────────────────────────────────────────────────────
 
-func jsonEqual(expected string, actual []byte) {
-	GinkgoHelper()
+func jsonEqual(t *testing.T, expected string, actual []byte) {
+	t.Helper()
+
 	var e, a any
-	Expect(json.Unmarshal([]byte(expected), &e)).To(Succeed())
-	Expect(json.Unmarshal(actual, &a)).To(Succeed())
-	Expect(a).To(Equal(e))
+	require.NoError(t, json.Unmarshal([]byte(expected), &e))
+	require.NoError(t, json.Unmarshal(actual, &a))
+	require.Equal(t, e, a)
 }
 
-func decodeProblem(body []byte) ProblemDetails {
-	GinkgoHelper()
+func decodeProblem(t *testing.T, body []byte) ProblemDetails {
+	t.Helper()
+
 	var problem ProblemDetails
-	Expect(json.Unmarshal(body, &problem)).To(Succeed())
+	require.NoError(t, json.Unmarshal(body, &problem))
 	return problem
 }
 

@@ -3,9 +3,10 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newCORSMiddleware(cfg map[string]interface{}) *Middleware {
@@ -21,172 +22,207 @@ func passthroughHandler() http.Handler {
 	})
 }
 
-var _ = Describe("CORS", func() {
-	var (
-		rec *httptest.ResponseRecorder
-		req *http.Request
-	)
+func newCORSTest() (*httptest.ResponseRecorder, *http.Request) {
+	return httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil)
+}
 
-	BeforeEach(func() {
-		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodGet, "/", nil)
-	})
+// newPreflightTest mirrors the "preflight" Context's nested BeforeEach.
+func newPreflightTest() (*httptest.ResponseRecorder, *http.Request) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/", nil)
+	req.Header.Set("Origin", "https://myapp.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
 
-	Describe("Init", func() {
-		It("rejects credentials combined with wildcard origin", func() {
-			m := &Middleware{}
-			err := m.Init(map[string]interface{}{
-				"allowed_origins":   []interface{}{"*"},
-				"allow_credentials": true,
-			})
+	return rec, req
+}
 
-			Expect(err).To(MatchError(ContainSubstring("cannot be used with wildcard origin")))
+func TestCORSInit(t *testing.T) {
+	t.Run("rejects credentials combined with wildcard origin", func(t *testing.T) {
+		m := &Middleware{}
+		err := m.Init(map[string]interface{}{
+			"allowed_origins":   []interface{}{"*"},
+			"allow_credentials": true,
 		})
 
-		It("succeeds with explicit origins and credentials", func() {
-			m := &Middleware{}
-			err := m.Init(map[string]interface{}{
+		assert.ErrorContains(t, err, "cannot be used with wildcard origin")
+	})
+
+	t.Run("succeeds with explicit origins and credentials", func(t *testing.T) {
+		m := &Middleware{}
+		err := m.Init(map[string]interface{}{
+			"allowed_origins":   []interface{}{"https://myapp.com"},
+			"allow_credentials": true,
+		})
+
+		require.NoError(t, err)
+	})
+}
+
+func TestCORSHandler(t *testing.T) {
+	t.Run("without an Origin header", func(t *testing.T) {
+		t.Run("passes the request through without CORS headers", func(t *testing.T) {
+			rec, req := newCORSTest()
+
+			m := newCORSMiddleware(map[string]interface{}{
+				"allowed_origins": []interface{}{"https://myapp.com"},
+			})
+
+			m.Handler(passthroughHandler()).ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+			assert.Empty(t, rec.Header().Get("Vary"))
+		})
+	})
+
+	t.Run("origin handling", func(t *testing.T) {
+		tests := []struct {
+			name                string
+			allowedOrigins      []interface{}
+			requestOrigin       string
+			expectedStatus      int
+			expectedAllowOrigin string
+		}{
+			{
+				name:                "allowed explicit origin echoes back",
+				allowedOrigins:      []interface{}{"https://myapp.com"},
+				requestOrigin:       "https://myapp.com",
+				expectedStatus:      http.StatusOK,
+				expectedAllowOrigin: "https://myapp.com",
+			},
+			{
+				name:                "disallowed origin returns 403",
+				allowedOrigins:      []interface{}{"https://myapp.com"},
+				requestOrigin:       "https://evil.com",
+				expectedStatus:      http.StatusForbidden,
+				expectedAllowOrigin: "",
+			},
+			{
+				name:                "wildcard responds with star",
+				allowedOrigins:      []interface{}{"*"},
+				requestOrigin:       "https://anyone.com",
+				expectedStatus:      http.StatusOK,
+				expectedAllowOrigin: "*",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				rec, req := newCORSTest()
+
+				m := newCORSMiddleware(map[string]interface{}{
+					"allowed_origins": tt.allowedOrigins,
+				})
+
+				req.Header.Set("Origin", tt.requestOrigin)
+				m.Handler(passthroughHandler()).ServeHTTP(rec, req)
+
+				assert.Equal(t, tt.expectedStatus, rec.Code)
+				assert.Equal(t, tt.expectedAllowOrigin, rec.Header().Get("Access-Control-Allow-Origin"))
+			})
+		}
+	})
+
+	t.Run("Vary header", func(t *testing.T) {
+		t.Run("is set to Origin for explicit allowed origins", func(t *testing.T) {
+			rec, req := newCORSTest()
+
+			m := newCORSMiddleware(map[string]interface{}{
+				"allowed_origins": []interface{}{"https://myapp.com"},
+			})
+
+			req.Header.Set("Origin", "https://myapp.com")
+			m.Handler(passthroughHandler()).ServeHTTP(rec, req)
+
+			assert.Equal(t, "Origin", rec.Header().Get("Vary"))
+		})
+
+		t.Run("is not set for wildcard origin", func(t *testing.T) {
+			rec, req := newCORSTest()
+
+			m := newCORSMiddleware(map[string]interface{}{
+				"allowed_origins": []interface{}{"*"},
+			})
+
+			req.Header.Set("Origin", "https://anyone.com")
+			m.Handler(passthroughHandler()).ServeHTTP(rec, req)
+
+			assert.Empty(t, rec.Header().Get("Vary"))
+		})
+	})
+
+	t.Run("with allow_credentials", func(t *testing.T) {
+		t.Run("emits Access-Control-Allow-Credentials: true", func(t *testing.T) {
+			rec, req := newCORSTest()
+
+			m := newCORSMiddleware(map[string]interface{}{
 				"allowed_origins":   []interface{}{"https://myapp.com"},
 				"allow_credentials": true,
 			})
 
-			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Origin", "https://myapp.com")
+			m.Handler(passthroughHandler()).ServeHTTP(rec, req)
+
+			assert.Equal(t, "true", rec.Header().Get("Access-Control-Allow-Credentials"))
 		})
 	})
 
-	Describe("Handler", func() {
-		Context("without an Origin header", func() {
-			It("passes the request through without CORS headers", func() {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins": []interface{}{"https://myapp.com"},
-				})
+	t.Run("preflight", func(t *testing.T) {
+		t.Run("responds with 204 and includes allowed methods and headers", func(t *testing.T) {
+			rec, req := newPreflightTest()
 
-				m.Handler(passthroughHandler()).ServeHTTP(rec, req)
-
-				Expect(rec.Code).To(Equal(http.StatusOK))
-				Expect(rec.Header().Get("Access-Control-Allow-Origin")).To(BeEmpty())
-				Expect(rec.Header().Get("Vary")).To(BeEmpty())
+			m := newCORSMiddleware(map[string]interface{}{
+				"allowed_origins": []interface{}{"https://myapp.com"},
+				"allowed_methods": []interface{}{"GET", "POST"},
+				"allowed_headers": []interface{}{"Content-Type", "Authorization"},
 			})
+
+			m.Handler(passthroughHandler()).ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusNoContent, rec.Code)
+			assert.NotEmpty(t, rec.Header().Get("Access-Control-Allow-Methods"))
+			assert.NotEmpty(t, rec.Header().Get("Access-Control-Allow-Headers"))
 		})
 
-		DescribeTable("origin handling",
-			func(allowedOrigins []interface{}, requestOrigin string, expectedStatus int, expectedAllowOrigin string) {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins": allowedOrigins,
-				})
+		t.Run("does not invoke the wrapped handler", func(t *testing.T) {
+			rec, req := newPreflightTest()
 
-				req.Header.Set("Origin", requestOrigin)
-				m.Handler(passthroughHandler()).ServeHTTP(rec, req)
-
-				Expect(rec.Code).To(Equal(expectedStatus))
-				Expect(rec.Header().Get("Access-Control-Allow-Origin")).To(Equal(expectedAllowOrigin))
-			},
-			Entry("allowed explicit origin echoes back",
-				[]interface{}{"https://myapp.com"}, "https://myapp.com",
-				http.StatusOK, "https://myapp.com"),
-			Entry("disallowed origin returns 403",
-				[]interface{}{"https://myapp.com"}, "https://evil.com",
-				http.StatusForbidden, ""),
-			Entry("wildcard responds with star",
-				[]interface{}{"*"}, "https://anyone.com",
-				http.StatusOK, "*"),
-		)
-
-		Context("Vary header", func() {
-			It("is set to Origin for explicit allowed origins", func() {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins": []interface{}{"https://myapp.com"},
-				})
-
-				req.Header.Set("Origin", "https://myapp.com")
-				m.Handler(passthroughHandler()).ServeHTTP(rec, req)
-
-				Expect(rec.Header().Get("Vary")).To(Equal("Origin"))
+			m := newCORSMiddleware(map[string]interface{}{
+				"allowed_origins": []interface{}{"https://myapp.com"},
+				"allowed_methods": []interface{}{"GET", "POST"},
 			})
 
-			It("is not set for wildcard origin", func() {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins": []interface{}{"*"},
-				})
-
-				req.Header.Set("Origin", "https://anyone.com")
-				m.Handler(passthroughHandler()).ServeHTTP(rec, req)
-
-				Expect(rec.Header().Get("Vary")).To(BeEmpty())
-			})
-		})
-
-		Context("with allow_credentials", func() {
-			It("emits Access-Control-Allow-Credentials: true", func() {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins":   []interface{}{"https://myapp.com"},
-					"allow_credentials": true,
-				})
-
-				req.Header.Set("Origin", "https://myapp.com")
-				m.Handler(passthroughHandler()).ServeHTTP(rec, req)
-
-				Expect(rec.Header().Get("Access-Control-Allow-Credentials")).To(Equal("true"))
-			})
-		})
-
-		Context("preflight", func() {
-			BeforeEach(func() {
-				req = httptest.NewRequest(http.MethodOptions, "/", nil)
-				req.Header.Set("Origin", "https://myapp.com")
-				req.Header.Set("Access-Control-Request-Method", "POST")
+			var reached bool
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				reached = true
 			})
 
-			It("responds with 204 and includes allowed methods and headers", func() {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins": []interface{}{"https://myapp.com"},
-					"allowed_methods": []interface{}{"GET", "POST"},
-					"allowed_headers": []interface{}{"Content-Type", "Authorization"},
-				})
+			m.Handler(handler).ServeHTTP(rec, req)
 
-				m.Handler(passthroughHandler()).ServeHTTP(rec, req)
-
-				Expect(rec.Code).To(Equal(http.StatusNoContent))
-				Expect(rec.Header().Get("Access-Control-Allow-Methods")).NotTo(BeEmpty())
-				Expect(rec.Header().Get("Access-Control-Allow-Headers")).NotTo(BeEmpty())
-			})
-
-			It("does not invoke the wrapped handler", func() {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins": []interface{}{"https://myapp.com"},
-					"allowed_methods": []interface{}{"GET", "POST"},
-				})
-
-				var reached bool
-				handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					reached = true
-				})
-
-				m.Handler(handler).ServeHTTP(rec, req)
-
-				Expect(reached).To(BeFalse())
-			})
-		})
-
-		Context("OPTIONS without preflight headers", func() {
-			It("passes through to the wrapped handler", func() {
-				m := newCORSMiddleware(map[string]interface{}{
-					"allowed_origins": []interface{}{"https://myapp.com"},
-				})
-
-				req = httptest.NewRequest(http.MethodOptions, "/", nil)
-				req.Header.Set("Origin", "https://myapp.com")
-
-				var reached bool
-				handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					reached = true
-					w.WriteHeader(http.StatusOK)
-				})
-
-				m.Handler(handler).ServeHTTP(rec, req)
-
-				Expect(reached).To(BeTrue())
-			})
+			assert.False(t, reached)
 		})
 	})
-})
+
+	t.Run("OPTIONS without preflight headers", func(t *testing.T) {
+		t.Run("passes through to the wrapped handler", func(t *testing.T) {
+			rec, _ := newCORSTest()
+
+			m := newCORSMiddleware(map[string]interface{}{
+				"allowed_origins": []interface{}{"https://myapp.com"},
+			})
+
+			req := httptest.NewRequest(http.MethodOptions, "/", nil)
+			req.Header.Set("Origin", "https://myapp.com")
+
+			var reached bool
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				reached = true
+				w.WriteHeader(http.StatusOK)
+			})
+
+			m.Handler(handler).ServeHTTP(rec, req)
+
+			assert.True(t, reached)
+		})
+	})
+}

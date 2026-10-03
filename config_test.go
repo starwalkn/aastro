@@ -2,9 +2,9 @@ package aastro
 
 import (
 	"net/http"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 )
 
 func minimalValidConfig(flows ...FlowConfig) Config {
@@ -18,126 +18,124 @@ func minimalValidConfig(flows ...FlowConfig) Config {
 	}
 }
 
-var _ = Describe("ValidateConfig", func() {
-	// Aggregation is only reached by the router when a flow has more than one
-	// upstream (see Router.dispatch) - a single-upstream flow is proxied
-	// directly, streaming or not, and never aggregates.
-	Describe("aggregation requirement", func() {
-		It("does not require aggregation for a single-upstream flow", func() {
-			cfg := minimalValidConfig(FlowConfig{
-				Path:      "/a",
-				Method:    http.MethodGet,
-				Upstreams: []UpstreamConfig{testUpstreamConfig("7001")},
-			})
-
-			Expect(ValidateConfig(&cfg)).To(Succeed())
+// Aggregation is only reached by the router when a flow has more than one
+// upstream (see Router.dispatch) - a single-upstream flow is proxied
+// directly, streaming or not, and never aggregates.
+func TestValidateConfig_AggregationRequirement(t *testing.T) {
+	t.Run("does not require aggregation for a single-upstream flow", func(t *testing.T) {
+		cfg := minimalValidConfig(FlowConfig{
+			Path:      "/a",
+			Method:    http.MethodGet,
+			Upstreams: []UpstreamConfig{newTestUpstreamConfig("7001")},
 		})
 
-		It("does not require aggregation for a streaming flow", func() {
-			cfg := minimalValidConfig(FlowConfig{
-				Path:      "/a",
-				Method:    http.MethodGet,
-				Streaming: true,
-				Upstreams: []UpstreamConfig{testUpstreamConfig("7001")},
-			})
-
-			Expect(ValidateConfig(&cfg)).To(Succeed())
-		})
-
-		It("requires aggregation for a multi-upstream flow", func() {
-			cfg := minimalValidConfig(FlowConfig{
-				Path:   "/a",
-				Method: http.MethodGet,
-				Upstreams: []UpstreamConfig{
-					testUpstreamConfig("7001"),
-					testUpstreamConfig("7002"),
-				},
-			})
-
-			Expect(ValidateConfig(&cfg)).To(MatchError(ContainSubstring("aggregation is required")))
-		})
-
-		It("accepts a multi-upstream flow that declares aggregation", func() {
-			cfg := minimalValidConfig(FlowConfig{
-				Path:   "/a",
-				Method: http.MethodGet,
-				Upstreams: []UpstreamConfig{
-					testUpstreamConfig("7001"),
-					testUpstreamConfig("7002"),
-				},
-				Aggregation: &AggregationConfig{Strategy: "array"},
-			})
-
-			Expect(ValidateConfig(&cfg)).To(Succeed())
-		})
+		assert.NoError(t, ValidateConfig(&cfg))
 	})
 
-	// The gateway never speaks cleartext HTTP/2 (h2c) - http2: on only makes
-	// sense where there's TLS to negotiate it over.
-	Describe("http2", func() {
-		It("rejects server http2: on without server TLS enabled", func() {
-			cfg := minimalValidConfig(FlowConfig{
-				Path:      "/a",
-				Method:    http.MethodGet,
-				Upstreams: []UpstreamConfig{testUpstreamConfig("7001")},
-			})
-			cfg.Gateway.Server.HTTP2 = "on"
-
-			Expect(ValidateConfig(&cfg)).To(MatchError(ContainSubstring("gateway.server.http2")))
+	t.Run("does not require aggregation for a streaming flow", func(t *testing.T) {
+		cfg := minimalValidConfig(FlowConfig{
+			Path:      "/a",
+			Method:    http.MethodGet,
+			Streaming: true,
+			Upstreams: []UpstreamConfig{newTestUpstreamConfig("7001")},
 		})
 
-		It("accepts server http2: on with server TLS enabled", func() {
-			cfg := minimalValidConfig(FlowConfig{
-				Path:      "/a",
-				Method:    http.MethodGet,
-				Upstreams: []UpstreamConfig{testUpstreamConfig("7001")},
-			})
-			cfg.Gateway.Server.HTTP2 = "on"
-			cfg.Gateway.Server.TLS = ServerTLSConfig{
-				Enabled:  true,
-				CertFile: "server.crt",
-				KeyFile:  "server.key",
-			}
-
-			Expect(ValidateConfig(&cfg)).To(Succeed())
-		})
-
-		It("accepts server http2: off regardless of TLS", func() {
-			cfg := minimalValidConfig(FlowConfig{
-				Path:      "/a",
-				Method:    http.MethodGet,
-				Upstreams: []UpstreamConfig{testUpstreamConfig("7001")},
-			})
-			cfg.Gateway.Server.HTTP2 = "off"
-
-			Expect(ValidateConfig(&cfg)).To(Succeed())
-		})
-
-		It("rejects upstream transport.http2: on without upstream TLS enabled", func() {
-			upstream := testUpstreamConfig("7001")
-			upstream.Transport.HTTP2 = "on"
-
-			cfg := minimalValidConfig(FlowConfig{
-				Path:      "/a",
-				Method:    http.MethodGet,
-				Upstreams: []UpstreamConfig{upstream},
-			})
-
-			Expect(ValidateConfig(&cfg)).To(MatchError(ContainSubstring(`upstream "test_service_7001": transport.http2`)))
-		})
-
-		It("accepts upstream transport.http2: on with upstream TLS enabled", func() {
-			upstream := testUpstreamConfig("7001")
-			upstream.Transport.HTTP2 = "on"
-			upstream.TLS = TLSConfig{Enabled: true}
-
-			cfg := minimalValidConfig(FlowConfig{
-				Path:      "/a",
-				Method:    http.MethodGet,
-				Upstreams: []UpstreamConfig{upstream},
-			})
-
-			Expect(ValidateConfig(&cfg)).To(Succeed())
-		})
+		assert.NoError(t, ValidateConfig(&cfg))
 	})
-})
+
+	t.Run("requires aggregation for a multi-upstream flow", func(t *testing.T) {
+		cfg := minimalValidConfig(FlowConfig{
+			Path:   "/a",
+			Method: http.MethodGet,
+			Upstreams: []UpstreamConfig{
+				newTestUpstreamConfig("7001"),
+				newTestUpstreamConfig("7002"),
+			},
+		})
+
+		assert.ErrorContains(t, ValidateConfig(&cfg), "aggregation is required")
+	})
+
+	t.Run("accepts a multi-upstream flow that declares aggregation", func(t *testing.T) {
+		cfg := minimalValidConfig(FlowConfig{
+			Path:   "/a",
+			Method: http.MethodGet,
+			Upstreams: []UpstreamConfig{
+				newTestUpstreamConfig("7001"),
+				newTestUpstreamConfig("7002"),
+			},
+			Aggregation: &AggregationConfig{Strategy: "array"},
+		})
+
+		assert.NoError(t, ValidateConfig(&cfg))
+	})
+}
+
+// The gateway never speaks cleartext HTTP/2 (h2c) - http2: on only makes
+// sense where there's TLS to negotiate it over.
+func TestValidateConfig_HTTP2(t *testing.T) {
+	t.Run("rejects server http2: on without server TLS enabled", func(t *testing.T) {
+		cfg := minimalValidConfig(FlowConfig{
+			Path:      "/a",
+			Method:    http.MethodGet,
+			Upstreams: []UpstreamConfig{newTestUpstreamConfig("7001")},
+		})
+		cfg.Gateway.Server.HTTP2 = "on"
+
+		assert.ErrorContains(t, ValidateConfig(&cfg), "gateway.server.http2")
+	})
+
+	t.Run("accepts server http2: on with server TLS enabled", func(t *testing.T) {
+		cfg := minimalValidConfig(FlowConfig{
+			Path:      "/a",
+			Method:    http.MethodGet,
+			Upstreams: []UpstreamConfig{newTestUpstreamConfig("7001")},
+		})
+		cfg.Gateway.Server.HTTP2 = "on"
+		cfg.Gateway.Server.TLS = ServerTLSConfig{
+			Enabled:  true,
+			CertFile: "server.crt",
+			KeyFile:  "server.key",
+		}
+
+		assert.NoError(t, ValidateConfig(&cfg))
+	})
+
+	t.Run("accepts server http2: off regardless of TLS", func(t *testing.T) {
+		cfg := minimalValidConfig(FlowConfig{
+			Path:      "/a",
+			Method:    http.MethodGet,
+			Upstreams: []UpstreamConfig{newTestUpstreamConfig("7001")},
+		})
+		cfg.Gateway.Server.HTTP2 = "off"
+
+		assert.NoError(t, ValidateConfig(&cfg))
+	})
+
+	t.Run("rejects upstream transport.http2: on without upstream TLS enabled", func(t *testing.T) {
+		upstream := newTestUpstreamConfig("7001")
+		upstream.Transport.HTTP2 = "on"
+
+		cfg := minimalValidConfig(FlowConfig{
+			Path:      "/a",
+			Method:    http.MethodGet,
+			Upstreams: []UpstreamConfig{upstream},
+		})
+
+		assert.ErrorContains(t, ValidateConfig(&cfg), `upstream "test_service_7001": transport.http2`)
+	})
+
+	t.Run("accepts upstream transport.http2: on with upstream TLS enabled", func(t *testing.T) {
+		upstream := newTestUpstreamConfig("7001")
+		upstream.Transport.HTTP2 = "on"
+		upstream.TLS = TLSConfig{Enabled: true}
+
+		cfg := minimalValidConfig(FlowConfig{
+			Path:      "/a",
+			Method:    http.MethodGet,
+			Upstreams: []UpstreamConfig{upstream},
+		})
+
+		assert.NoError(t, ValidateConfig(&cfg))
+	})
+}

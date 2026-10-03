@@ -3,11 +3,12 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func makeHMACToken(secret []byte, issuer, audience string, exp time.Time) (string, error) {
@@ -27,179 +28,197 @@ func makeHMACToken(secret []byte, issuer, audience string, exp time.Time) (strin
 	return signed, nil
 }
 
-var _ = Describe("Auth", func() {
-	Describe("Handler", func() {
-		var (
-			secret []byte
-			m      *Middleware
-		)
+func newAuthTestMiddleware(secret []byte) *Middleware {
+	return &Middleware{
+		issuer:   "test-issuer",
+		audience: "test-aud",
+		realm:    defaultRealm,
+		resolver: &hmacResolver{HMACSecret: secret},
+		jwtConfig: jwtConfig{
+			alg:        "HS256",
+			hmacSecret: secret,
+		},
+	}
+}
 
-		BeforeEach(func() {
-			secret = []byte("secret")
-			m = &Middleware{
-				issuer:   "test-issuer",
-				audience: "test-aud",
-				realm:    defaultRealm,
-				resolver: &hmacResolver{HMACSecret: secret},
-				jwtConfig: jwtConfig{
-					alg:        "HS256",
-					hmacSecret: secret,
-				},
-			}
-		})
+func TestAuthHandler(t *testing.T) {
+	secret := []byte("secret")
 
-		Context("no auth header", func() {
-			It("returns unauthorized status code", func() {
-				h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("ok"))
-				}))
+	t.Run("no auth header", func(t *testing.T) {
+		t.Run("returns unauthorized status code", func(t *testing.T) {
+			m := newAuthTestMiddleware(secret)
 
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				rec := httptest.NewRecorder()
+			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("ok"))
+			}))
 
-				h.ServeHTTP(rec, req)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
 
-				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
-				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(`Bearer realm="restricted"`))
-			})
-		})
+			h.ServeHTTP(rec, req)
 
-		Context("invalid bearer token", func() {
-			It("returns unauthorized status code", func() {
-				h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("ok"))
-				}))
-
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Header.Set("Authorization", "Bearer invalid-token")
-
-				rec := httptest.NewRecorder()
-
-				h.ServeHTTP(rec, req)
-
-				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
-				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
-					`Bearer realm="restricted", error="invalid_token", error_description="invalid or expired token"`,
-				))
-			})
-		})
-
-		Context("expired bearer token", func() {
-			It("returns unauthorized status code", func() {
-				token, err := makeHMACToken(secret, "test-issuer", "test-aud", time.Now().Add(-time.Hour))
-				Expect(err).ToNot(HaveOccurred())
-
-				h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("ok"))
-				}))
-
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Header.Set("Authorization", "Bearer "+token)
-
-				rec := httptest.NewRecorder()
-
-				h.ServeHTTP(rec, req)
-
-				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
-				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
-					`Bearer realm="restricted", error="invalid_token", error_description="invalid or expired token"`,
-				))
-			})
-		})
-
-		Context("valid bearer token", func() {
-			It("successfully passes the request", func() {
-				token, err := makeHMACToken(secret, "test-issuer", "test-aud", time.Now().Add(time.Hour))
-				Expect(err).ToNot(HaveOccurred())
-
-				var gotClaims *jwt.MapClaims
-
-				h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					claims := r.Context().Value(ctxKeyClaims{}).(*jwt.MapClaims)
-					gotClaims = claims
-
-					w.Write([]byte("ok"))
-				}))
-
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Header.Set("Authorization", "Bearer "+token)
-
-				rec := httptest.NewRecorder()
-
-				h.ServeHTTP(rec, req)
-
-				Expect(rec.Code).To(Equal(http.StatusOK))
-				Expect(rec.Header().Get("WWW-Authenticate")).To(BeEmpty())
-				Expect(gotClaims).ToNot(BeNil())
-				Expect(gotClaims.GetIssuer()).To(Equal("test-issuer"))
-				Expect(gotClaims.GetAudience()).To(ContainElement("test-aud"))
-			})
-		})
-		Context("malformed authorization header", func() {
-			It("returns invalid_request challenge", func() {
-				h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					_, _ = w.Write([]byte("ok"))
-				}))
-
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Header.Set("Authorization", "Basic abc123")
-
-				rec := httptest.NewRecorder()
-
-				h.ServeHTTP(rec, req)
-
-				Expect(rec.Code).To(Equal(http.StatusUnauthorized))
-				Expect(rec.Header().Get("WWW-Authenticate")).To(Equal(
-					`Bearer realm="restricted", error="invalid_request", error_description="invalid authorization header"`,
-				))
-			})
-		})
-		Describe("buildWWWAuthenticateHeader", func() {
-			It("builds a realm-only Bearer challenge", func() {
-				Expect(buildWWWAuthenticateHeader("restricted", "", "")).To(Equal(`Bearer realm="restricted"`))
-			})
-
-			It("builds an invalid_token Bearer challenge", func() {
-				Expect(buildWWWAuthenticateHeader("custom-realm", authErrorInvalidToken, "invalid or expired token")).To(Equal(
-					`Bearer realm="custom-realm", error="invalid_token", error_description="invalid or expired token"`,
-				))
-			})
-
-			It("uses the default realm when realm is empty", func() {
-				Expect(buildWWWAuthenticateHeader("", authErrorInvalidRequest, "invalid authorization header")).To(Equal(
-					`Bearer realm="restricted", error="invalid_request", error_description="invalid authorization header"`,
-				))
-			})
-		})
-		Describe("Init", func() {
-			It("uses a custom realm from config", func() {
-				middleware := &Middleware{}
-
-				err := middleware.Init(map[string]interface{}{
-					"issuer":      "test-issuer",
-					"audience":    "test-aud",
-					"alg":         "HS256",
-					"hmac_secret": "c2VjcmV0",
-					"realm":       "custom-realm",
-				})
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(middleware.realm).To(Equal("custom-realm"))
-			})
-
-			It("uses the default realm when none is configured", func() {
-				middleware := &Middleware{}
-
-				err := middleware.Init(map[string]interface{}{
-					"issuer":      "test-issuer",
-					"audience":    "test-aud",
-					"alg":         "HS256",
-					"hmac_secret": "c2VjcmV0",
-				})
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(middleware.realm).To(Equal(defaultRealm))
-			})
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Equal(t, `Bearer realm="restricted"`, rec.Header().Get("WWW-Authenticate"))
 		})
 	})
-})
+
+	t.Run("invalid bearer token", func(t *testing.T) {
+		t.Run("returns unauthorized status code", func(t *testing.T) {
+			m := newAuthTestMiddleware(secret)
+
+			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("ok"))
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Authorization", "Bearer invalid-token")
+
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Equal(t,
+				`Bearer realm="restricted", error="invalid_token", error_description="invalid or expired token"`,
+				rec.Header().Get("WWW-Authenticate"),
+			)
+		})
+	})
+
+	t.Run("expired bearer token", func(t *testing.T) {
+		t.Run("returns unauthorized status code", func(t *testing.T) {
+			m := newAuthTestMiddleware(secret)
+
+			token, err := makeHMACToken(secret, "test-issuer", "test-aud", time.Now().Add(-time.Hour))
+			require.NoError(t, err)
+
+			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("ok"))
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Equal(t,
+				`Bearer realm="restricted", error="invalid_token", error_description="invalid or expired token"`,
+				rec.Header().Get("WWW-Authenticate"),
+			)
+		})
+	})
+
+	t.Run("valid bearer token", func(t *testing.T) {
+		t.Run("successfully passes the request", func(t *testing.T) {
+			m := newAuthTestMiddleware(secret)
+
+			token, err := makeHMACToken(secret, "test-issuer", "test-aud", time.Now().Add(time.Hour))
+			require.NoError(t, err)
+
+			var gotClaims *jwt.MapClaims
+
+			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				claims := r.Context().Value(ctxKeyClaims{}).(*jwt.MapClaims)
+				gotClaims = claims
+
+				w.Write([]byte("ok"))
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Empty(t, rec.Header().Get("WWW-Authenticate"))
+			require.NotNil(t, gotClaims)
+
+			issuer, err := gotClaims.GetIssuer()
+			require.NoError(t, err)
+			assert.Equal(t, "test-issuer", issuer)
+
+			audience, err := gotClaims.GetAudience()
+			require.NoError(t, err)
+			assert.Contains(t, audience, "test-aud")
+		})
+	})
+
+	t.Run("malformed authorization header", func(t *testing.T) {
+		t.Run("returns invalid_request challenge", func(t *testing.T) {
+			m := newAuthTestMiddleware(secret)
+
+			h := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("ok"))
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Authorization", "Basic abc123")
+
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Equal(t,
+				`Bearer realm="restricted", error="invalid_request", error_description="invalid authorization header"`,
+				rec.Header().Get("WWW-Authenticate"),
+			)
+		})
+	})
+}
+
+func TestBuildWWWAuthenticateHeader(t *testing.T) {
+	t.Run("builds a realm-only Bearer challenge", func(t *testing.T) {
+		assert.Equal(t, `Bearer realm="restricted"`, buildWWWAuthenticateHeader("restricted", "", ""))
+	})
+
+	t.Run("builds an invalid_token Bearer challenge", func(t *testing.T) {
+		assert.Equal(t,
+			`Bearer realm="custom-realm", error="invalid_token", error_description="invalid or expired token"`,
+			buildWWWAuthenticateHeader("custom-realm", authErrorInvalidToken, "invalid or expired token"),
+		)
+	})
+
+	t.Run("uses the default realm when realm is empty", func(t *testing.T) {
+		assert.Equal(t,
+			`Bearer realm="restricted", error="invalid_request", error_description="invalid authorization header"`,
+			buildWWWAuthenticateHeader("", authErrorInvalidRequest, "invalid authorization header"),
+		)
+	})
+}
+
+func TestAuthInit(t *testing.T) {
+	t.Run("uses a custom realm from config", func(t *testing.T) {
+		middleware := &Middleware{}
+
+		err := middleware.Init(map[string]interface{}{
+			"issuer":      "test-issuer",
+			"audience":    "test-aud",
+			"alg":         "HS256",
+			"hmac_secret": "c2VjcmV0",
+			"realm":       "custom-realm",
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, "custom-realm", middleware.realm)
+	})
+
+	t.Run("uses the default realm when none is configured", func(t *testing.T) {
+		middleware := &Middleware{}
+
+		err := middleware.Init(map[string]interface{}{
+			"issuer":      "test-issuer",
+			"audience":    "test-aud",
+			"alg":         "HS256",
+			"hmac_secret": "c2VjcmV0",
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, defaultRealm, middleware.realm)
+	})
+}
