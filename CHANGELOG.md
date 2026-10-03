@@ -7,6 +7,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.11.1] - 2026-10-03
+
+### Fixed
+
+- `http2: off` broke every TLS connection with an HTTP/2-capable peer instead of pinning it to HTTP/1.1 - on the
+  data port clients got the connection dropped mid-request, on an upstream every request failed with 502. `off` only
+  restricted `http.Server`/`http.Transport.Protocols`, while the TLS config still hardcoded ALPN
+  `NextProtos: [h2, http/1.1]`, so the handshake kept negotiating `h2` that the HTTP layer then couldn't speak. ALPN
+  now advertises only `http/1.1` when `http2: off`, on both the server and the upstream side. `auto` and `on` are
+  unaffected, as is anything without TLS (no ALPN there, so no HTTP/2 to negotiate in the first place).
+
 ## [0.11.0] - 2026-10-03
 
 ### Added

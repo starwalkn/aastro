@@ -135,6 +135,45 @@ func TestReloader(t *testing.T) {
 	})
 }
 
+func TestReloaderALPN(t *testing.T) {
+	dir := t.TempDir()
+	ca, caKey, caPEM := certgen.NewCA()
+	cp, kp := certgen.NewLeaf(ca, caKey, 1)
+
+	certFile, keyFile, caFile := filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"), filepath.Join(dir, "ca.crt")
+	certgen.WriteAtomic(certFile, cp)
+	certgen.WriteAtomic(keyFile, kp)
+	certgen.WriteAtomic(caFile, caPEM)
+
+	for _, tt := range []struct {
+		name         string
+		disableHTTP2 bool
+		want         []string
+	}{
+		{name: "h2 and http/1.1 by default", want: []string{"h2", "http/1.1"}},
+		{name: "http/1.1 only with DisableHTTP2", disableHTTP2: true, want: []string{"http/1.1"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := NewReloader(ReloaderConfig{
+				CertFile: certFile, KeyFile: keyFile, CAFile: caFile,
+				MinVersion:   tls.VersionTLS12,
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+				DisableHTTP2: tt.disableHTTP2,
+			})
+			require.NoError(t, err)
+
+			srv := r.ServerConfig()
+			assert.Equal(t, tt.want, srv.NextProtos, "server")
+			assert.Equal(t, tt.want, r.ClientConfig().NextProtos, "client")
+
+			// With client auth, the handshake runs on the per-client config.
+			perClient, err := srv.GetConfigForClient(&tls.ClientHelloInfo{})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, perClient.NextProtos, "server, per-client config")
+		})
+	}
+}
+
 func mustCAPEM(_ *x509.Certificate) []byte {
 	_, _, pem := certgen.NewCA()
 	return pem

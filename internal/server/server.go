@@ -36,7 +36,7 @@ func New(ctx context.Context, cfg aastro.GatewayConfig, version string, log *zap
 		return nil, fmt.Errorf("bootstrap router: %w", err)
 	}
 
-	tlsConfig, err := buildTLSConfig(cfg.Server.TLS, bundle.TLSRegistry)
+	tlsConfig, err := buildTLSConfig(cfg.Server.TLS, cfg.Server.HTTP2, bundle.TLSRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("build server TLS config: %w", err)
 	}
